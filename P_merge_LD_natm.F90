@@ -26,11 +26,11 @@ Program Parallel_Merge_Lagrangian_Data
   integer :: file_start, file_end
   integer, parameter :: fread_unit = 100, fread_param = 1000
 
-  integer, parameter :: N_Scalar = 11
+  integer, parameter :: N_Scalar = 21
   character(*), parameter :: restart_name = "Lagrangian_Restart.nc"
-  character(*), dimension(N_Scalar), parameter :: var_name =(/"rho","qa","qv","qc","qi","qr","qs","qg","t","tabs","p"/)!,"ss","lh","b","conv_12","conv_13","conv_14","conv_x4","conv_x5","conv_x6","conv_y1"/)
-  character(*), dimension(N_Scalar), parameter :: var_unit =(/"kg/m^3","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","K","K","Pa"/)!,"1","J/m^3/s","m/s^2","1/s","1/s","1/s","1/s","1/s","1/s","1/s"/)
-  character(*), dimension(N_Scalar), parameter :: var_lname =(/"Density","Dry air","Water vapor","Liquid water","ice","Rain","snow","graupel","Moist Potential Temperature","Temperature","Pressure"/)!,"SuperSaturation","Latent Heat","Buoyancy","Cond to Liquid","Cond to Ice", "Cond to Snow", "Liquid/Ice to Rain","Liquid/Ice to Snow","Liquid/Ice to Graupel","Rain/Snow/Graupel to Vapor"/)
+  character(*), dimension(N_Scalar), parameter :: var_name =(/"rho","qa","qv","qc","qi","qr","qs","qg","t","tabs","p","ss","lh","b","conv_12","conv_13","conv_14","conv_x4","conv_x5","conv_x6","conv_y1"/)
+  character(*), dimension(N_Scalar), parameter :: var_unit =(/"kg/m^3","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","K","K","Pa","1","J/m^3/s","m/s^2","1/s","1/s","1/s","1/s","1/s","1/s","1/s"/)
+  character(*), dimension(N_Scalar), parameter :: var_lname =(/"Density","Dry air","Water vapor","Liquid water","ice","Rain","snow","graupel","Moist Potential Temperature","Temperature","Pressure","SuperSaturation","Latent Heat","Buoyancy","Cond to Liquid","Cond to Ice", "Cond to Snow", "Liquid/Ice to Rain","Liquid/Ice to Snow","Liquid/Ice to Graupel","Rain/Snow/Graupel to Vapor"/)
 
   character(*), dimension(3), parameter :: Coord_var_name =(/"x","y","z"/)
   character(*), dimension(3), parameter :: Coord_var_unit =(/"m","m","m"/)
