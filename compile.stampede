@@ -1,0 +1,6 @@
+#!/bin/bash
+input=$1
+fname=${input/.F90/}
+mpif90 -I${TACC_NETCDF_INC} -r8 -O3 -c ${fname}.F90
+mpif90 -O3 -o ${fname} ${fname}.o -L${TACC_NETCDF_LIB} -L${TACC_HDF5_LIB} -lnetcdff -lhdf5_hl -lhdf5 -lz
+rm ${fname}.o
