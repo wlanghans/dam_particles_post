@@ -1,4 +1,7 @@
 module particle_data
+
+  use mpi_info
+
   implicit none
 
   integer, parameter :: N_Scalar = 11!14
@@ -56,7 +59,6 @@ module particle_data
 
 
   subroutine compute_particle_mass(Nz,dz,dA)
-    use mpi_info
     implicit none
     integer :: i,idx,N_t
 
@@ -100,7 +102,6 @@ module particle_data
   end subroutine compute_particle_mass
 
   subroutine select_particles(step_in,N_sel,num_sel,rad_in,xc,yc,id_vec)
-    use mpi_info
     implicit none
 
     integer,intent(in) :: num_sel,step_in
@@ -205,7 +206,6 @@ module particle_data
   end subroutine select_particles 
 
    subroutine compute_particle_mass_subdomain_hori(Nz,Nx,Ny,dx,dy,dz,zl,zr,yl,yr,local_mass,N_j,icat)
-    use mpi_info
     implicit none
     integer :: i,idx,idx_x, idx_y, pcat, N_t
 
@@ -303,7 +303,6 @@ module particle_data
 
 
   subroutine compute_particle_mass_subdomain(Nz,Nx,Ny,dx,dy,dz,xl,xr,yl,yr,local_mass,N_j,icat)
-    use mpi_info
     implicit none
     integer :: i,idx,idx_x, idx_y, pcat, N_t
 

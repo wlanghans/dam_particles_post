@@ -57,7 +57,7 @@ Program Parallel_Merge_Lagrangian_Data
   real(8), dimension(:), allocatable ::  R_Read_Buffer, R_Send_Buffer, R_Recv_Buffer
   integer, dimension(:), allocatable :: Int_Read_Buffer,Int_Read_Buffer2, Int_Read_Buffer3, Int_Send_Buffer,Int_Send_Buffer2, Int_Send_Buffer3, Int_Recv_Buffer, Int_Recv_Buffer2,Int_Recv_Buffer3, Category, Natm
   integer, dimension(:), allocatable :: Send_Request, Recv_Request
-  integer, dimension(:,:), allocatable :: mpi_status
+  integer, dimension(:,:), allocatable :: impi_status
 
   real(8) :: ttime, t_tmp
 
@@ -74,7 +74,7 @@ integer :: iargc
   allocate(N_Sum_Send(Nproc),N_Sum_Recv(Nproc),Send_Counter(Nproc))
   allocate(mpi_id(Nproc-1))
   allocate(Send_Request(Nproc-1),Recv_Request(Nproc-1))
-  allocate( mpi_status(MPI_STATUS_SIZE,Nproc-1) )
+  allocate( impi_status(MPI_STATUS_SIZE,Nproc-1) )
 
   itmp(1) = 0
   do i = 0, Nproc-1
@@ -309,8 +309,8 @@ integer :: iargc
       endif
     enddo
 
-    call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
-    call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
+    call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
 
     N_Sum_Recv = 0
     do i = 2, Nproc
@@ -329,8 +329,8 @@ integer :: iargc
     enddo
 
 !WL2013
-    call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
-    call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
+    call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
     do i = 1, Nproc-1
       idx = N_Sum_Recv(i)
       itmp(1) = N_Recv( mpi_id(i) + 1 )
@@ -342,8 +342,8 @@ integer :: iargc
     enddo
    
     !WL2013
-    call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
-    call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
+    call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
     do i = 1, Nproc-1
       idx = N_Sum_Recv(i)
       itmp(1) = N_Recv( mpi_id(i) + 1 )
@@ -371,8 +371,8 @@ integer :: iargc
       endif
     enddo
 
-    call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
-    call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
+    call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
 
     do i = 1, Nproc-1
       idx = 3*N_Sum_Recv(i) 
@@ -384,7 +384,7 @@ integer :: iargc
       call MPI_Isend(R_Send_Buffer(idx+1:idx+itmp(1)), itmp(1), MPI_REAL8, mpi_id(i), my_id, MPI_COMM_WORLD, Send_Request(i), ierr)
     enddo
 
-    call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
 
     Send_Counter = 0
     do i = 1, Local_Read_in
@@ -411,7 +411,7 @@ integer :: iargc
       call MPI_Isend(R_Send_Buffer(idx+1:idx+itmp(1)), itmp(1), MPI_REAL8, mpi_id(i), my_id, MPI_COMM_WORLD, Send_Request(i), ierr)
     enddo
 
-    call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
     do i = 1, N_Sum_Recv(Nproc)
       idx = Int_Recv_Buffer(i) - id_start + 1
       Category(idx) = Int_Recv_Buffer2(i)
@@ -431,7 +431,7 @@ integer :: iargc
       call MPI_Irecv(R_Recv_Buffer(idx+1:idx+itmp(1)), itmp(1), MPI_REAL8, mpi_id(i), mpi_id(i), MPI_COMM_WORLD, Recv_Request(i), ierr)
     enddo
 
-    call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
     Send_Counter = 0
     do i = 1, Local_Read_in
       idesti = mpi_desti(i)
@@ -452,7 +452,7 @@ integer :: iargc
       call MPI_Isend(R_Send_Buffer(idx+1:idx+itmp(1)), itmp(1), MPI_REAL8, mpi_id(i), my_id, MPI_COMM_WORLD, Send_Request(i), ierr)
     enddo
 
-    call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
     do i = 1, N_Sum_Recv(Nproc)
       idx = Int_Recv_Buffer(i) - id_start + 1
       Vel(idx,1) = R_Recv_Buffer( (i-1)*4 + 1)
@@ -468,7 +468,7 @@ integer :: iargc
       call MPI_Irecv(R_Recv_Buffer(idx+1:idx+itmp(1)), itmp(1), MPI_REAL8, mpi_id(i), mpi_id(i), MPI_COMM_WORLD, Recv_Request(i), ierr)
     enddo
 
-    call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
     do k = 1, N_Scalar - 1
       Send_Counter = 0
       do i = 1, Local_Read_in
@@ -490,7 +490,7 @@ integer :: iargc
         call MPI_Isend(R_Send_Buffer(idx+1:idx+itmp(1)), itmp(1), MPI_REAL8, mpi_id(i), my_id, MPI_COMM_WORLD, Send_Request(i), ierr)
       enddo
 
-      call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+      call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
       do i = 1, N_Sum_Recv(Nproc)
         idx = Int_Recv_Buffer(i) - id_start + 1
         Scalar_Var(idx,k) = R_Recv_Buffer( i )
@@ -502,10 +502,10 @@ integer :: iargc
         call MPI_Irecv(R_Recv_Buffer(idx+1:idx+itmp(1)), itmp(1), MPI_REAL8, mpi_id(i), mpi_id(i), MPI_COMM_WORLD, Recv_Request(i), ierr)
       enddo
 
-      call MPI_Waitall(Nproc-1, Send_Request, mpi_status,ierr)
+      call MPI_Waitall(Nproc-1, Send_Request, impi_status,ierr)
     enddo
 
-    call MPI_Waitall(Nproc-1, Recv_Request, mpi_status,ierr)
+    call MPI_Waitall(Nproc-1, Recv_Request, impi_status,ierr)
     do i = 1, N_Sum_Recv(Nproc)
       idx = Int_Recv_Buffer(i) - id_start + 1
       Scalar_Var(idx,N_Scalar) = R_Recv_Buffer( i )

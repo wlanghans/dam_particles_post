@@ -1,5 +1,6 @@
 module core_info
   use netcdf
+  use mpi_info
   implicit none
 
   character(120) :: param, path
@@ -24,7 +25,6 @@ module core_info
   contains
 
   subroutine initialize_core_files
-    use mpi_info
     use particle_data
     implicit none
     integer :: i, j, id_start, id_end, Np_local
