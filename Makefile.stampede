@@ -16,6 +16,7 @@ modules = $(FD)module_core.o $(FD)module_mpi.o $(FD)module_particle.o
 
 $(EXE): $(FD)$(main) $(modules)
 	$(FC) $(FLAGS) -o $(EXE) $(FD)$(main) $(modules) $(LDFLAGS)
+	mv $(EXE) ../.
 
 $(FD)$(main): $(EXE).F90 $(modules)
 	$(FC) $(FLAGS) -c $(EXE).F90
