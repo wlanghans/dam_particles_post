@@ -1,11 +1,11 @@
 module particle_data
   implicit none
 
-  integer, parameter :: N_Scalar = 9
+  integer, parameter :: N_Scalar = 15
 
   real(8), parameter :: qc_cutoff = 1.d-5, w_cutoff = -100.d0
 
-  character(*), dimension(N_Scalar), parameter :: var_name =(/"rho","qa","qv","qc","qr","qi","t","tabs","p"/)
+  character(*), dimension(N_Scalar), parameter :: var_name =(/"rho","qa","qv","qc","qr","qi","t","tabs","p","b","Fdyn","Fbuoy","Fbuoyd","Fbuoyv","Fbuoyc"/)
   character(*), dimension(3), parameter :: Coord_var_name =(/"x","y","z"/)
   character(*), dimension(3), parameter ::   Vel_var_name =(/"u","v","w"/)
 
