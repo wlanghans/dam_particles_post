@@ -16,6 +16,9 @@ Program Parallel_Statistics
   integer :: itmp(10), step, step_cnt, step_out, step_in, int_tmp
   integer :: sum_Np, Nt_tot, N_active, Nz
   integer :: N_Count, idx, idx_x, idx_y,ierr
+ 
+  integer, dimension(:), allocatable :: N_triggered, local_mpi_int_buffer
+  real(8), dimension(:), allocatable :: Fdyn, Fbuoy, w2, local_mpi_real_buffer
 
   character(128):: fname_out
   character(*), parameter :: output_dir = "./"
@@ -23,7 +26,7 @@ Program Parallel_Statistics
   integer :: output_ncid
   integer :: dimids(2)
 
-  integer :: t_varid, z_varid
+  integer :: z_varid
   integer, dimension(10) :: var_out_id
 
   real(8), allocatable, dimension(:) :: Cell_Particle, Entrain, Lv_flux, inv_den, Center_Mass
@@ -46,6 +49,12 @@ Program Parallel_Statistics
 
   N_active=0
   Nz = int(max_height/dz) 
+
+  allocate(N_triggered(Nz))
+  allocate(local_mpi_int_buffer(Nz))
+  allocate(Fdyn(Nz))
+  allocate(Fbuoy(Nz))
+  allocate(w2(Nz))
 
   do step_out = 2, N_step
 
@@ -88,90 +97,66 @@ Program Parallel_Statistics
   if (masterproc) write(*,*) int_tmp ' particles are active and untriggered at end of simulation'
 
   ! now get sum up all vertical profiles for all triggered particles
+  call Read_Data(1, part_new)
   do step_out=2,N_step
+    time=step_out*dt
+    part_old = part_new
+    call Read_Data(step_out, part_new)
       do i = 1, num_part
-        if(part_new(i)%inactive_time.lt.0.0) then
-           
+        if(part_new(i)%inactive_time.lt.0.0.and.abs(part_new(i)%inactive_time).le.time.and. &
+           part_new(i)%Pos(3).lt.max_height) then
+           Nz_ind = INT(part_new(i)%Pos(3)/dz) + 1
+           N_triggered(Nz_ind) = N_triggered(Nz_ind) + 1     
+           Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + part_new(i)%scalar_var(x) 
+           Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + part_new(i)%scalar_var(y) 
+           w2(Nz_ind)          = w2(Nz_ind)    + (part_new(i)%Vel(3))**2
         end if
      
       end do
   end do
 
+  ! get average profiles
+  call MPI_Allreduce(N_triggered,local_mpi_int_buffer,Nz,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  N_triggered  = local_mpi_int_buffer
+  call MPI_Allreduce(Fbuoy,local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  Fbuoy = local_mpi_real_buffer
+  call MPI_Allreduce(Fdyn,local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  Fdyn = local_mpi_real_buffer
+  call MPI_Allreduce(w2,local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  w2 = local_mpi_real_buffer
 
-          if(part_new(i)%Pos(3) > max_height - dz) then
-
-            Cell_Particle(step_out) = Cell_Particle(step_out) + 1.d0
-            Center_Mass(step_out) = Center_Mass(step_out) + part_new(i)%Pos(3)
-            if(.not.part_old(i)%activity .and. (part_new(i)%inactive_time > Det_timer) ) &
-              Entrain(step_out) = Entrain(step_out) + 1.d0
-
-            Lv_flux(step_out) = Lv_flux(step_out) + max(w_cutoff, .5d0*( part_new(i)%Vel(3) + part_old(i)%Vel(3) ) )
-            inv_den(step_out) = inv_den(step_out) + 2.d0/( part_new(i)%Scalar_Var(1)*part_new(i)%Scalar_var(2) &
-                                                          +part_old(i)%Scalar_Var(1)*part_old(i)%Scalar_var(2) )
-
-          endif
-          part_new(i)%inactive_time = 0.d0
-
-        endif
-      enddo
-
-    enddo
-
-    if(root) write(*,*) step_out, step_cnt
-  enddo
-
-  call Reduce_Mtx(Cell_Particle)
-  call Reduce_Mtx(Center_Mass)
-  call Reduce_Mtx(Lv_flux)
-  call Reduce_Mtx(inv_den)
-  call Reduce_Mtx(Entrain)
-
-  Center_Mass = Center_Mass/(Cell_Particle + 1.d-15)
+  Fbuoy = Fbuoy/dfloat(N_triggered)
+  Fdyn  = Fdyn /dfloat(N_triggered)
+  w2    = w2   /dfloat(N_triggered)
 
   if(root) then
     write(*,*) "Writing Data"
 
-    write(char_tmp,'(i16)') int(N_Avg* (dt + 1.d-10) )
     write(char_dz,'(i16)') int(dz)
-    write(char_w,'(i16)') int(w_cutoff)
-    fname_out = trim(adjustl(output_dir))//'CT_Entrainment_dz_'//trim(adjustl(char_dz))//'_Tavg_'//trim(adjustl(char_tmp))//'_W_'//trim(adjustl(char_w))//'.nc'
+    fname_out = trim(adjustl(output_dir))//'Triggered_profile_dz_'//trim(adjustl(char_dz))//'.nc'
     write(*,*) fname_out
     call check_nc( nf90_create(fname_out,nf90_clobber,output_ncid) )
 
 !  Define Dimensions
-    call check_nc( nf90_def_dim(output_ncid,"time",Nt_tot,dimids(1)) )
+    call check_nc( nf90_def_dim(output_ncid,"height",Nz,dimids(1)) )
 
-    call check_nc( nf90_def_var(output_ncid,"time",nf90_double,dimids(1),t_varid) )
+    call check_nc( nf90_def_var(output_ncid,"height",nf90_double,dimids(1),z_varid) )
 
 !  Define Variables
-    call check_nc( nf90_def_var( output_ncid,"N_Particle"        ,nf90_double,dimids(1),var_out_id(1) ) )
-    call check_nc( nf90_def_var( output_ncid,"Entrainment_10_sec",nf90_double,dimids(1),var_out_id(2) ) )
-    call check_nc( nf90_def_var( output_ncid,"Vertical_flux"     ,nf90_double,dimids(1),var_out_id(3) ) )
-    call check_nc( nf90_def_var( output_ncid,"inv_density"       ,nf90_double,dimids(1),var_out_id(4) ) )
-    call check_nc( nf90_def_var( output_ncid,"Center_Mass"       ,nf90_double,dimids(1),var_out_id(5) ) )
+    call check_nc( nf90_def_var( output_ncid,"N_triggered"       ,nf90_double,dimids(1),var_out_id(1) ) )
+    call check_nc( nf90_def_var( output_ncid,"Fdyn"              ,nf90_double,dimids(1),var_out_id(2) ) )
+    call check_nc( nf90_def_var( output_ncid,"Fbuoy"             ,nf90_double,dimids(1),var_out_id(3) ) )
+    call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids(1),var_out_id(4) ) )
 
     call check_nc( nf90_enddef(output_ncid) )
 
 !  Put variables
-    call check_nc( nf90_put_var(output_ncid, t_varid, (/(dfloat(i)*dt*N_avg +.5d0*dt*N_avg,i=0,Nt_tot-1)/) ) )
+    call check_nc( nf90_put_var(output_ncid, z_varid, (/(dfloat(i)*dz +.5d0*dz,i=0,Nz-1)/) ) )
 
-    cell_volume = dz*dA
-
-    Cell_Particle = Cell_Particle/dfloat(N_avg)
-    Lv_flux = Lv_flux/dfloat(N_avg)
-    inv_den = inv_den/dfloat(N_avg)
-    Entrain = Entrain/dfloat(N_avg)
-
-    Lv_flux = dmass*Lv_flux/ cell_volume
-    inv_den = dmass*inv_den/ cell_volume
-
-    Entrain     = dmass*Entrain    /(cell_volume*dt)
-
-    call check_nc( nf90_put_var(output_ncid, var_out_id(1), Cell_Particle) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(2), Entrain) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(3), Lv_flux) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(4), inv_den) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(5), Center_Mass) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(N_triggered)) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(3), Fbuoy) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(4), w2) )
 
     call check_nc( nf90_close(output_ncid) )
 
