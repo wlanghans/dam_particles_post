@@ -17,7 +17,7 @@ Program Parallel_Merge_Lagrangian_Data
 
   integer :: my_id, Nproc, ierr
 
-  integer :: i,j,k, iskip, idesti, idx, N_one, N_one_rec
+  integer :: i,j,k, iskip, idesti, idx 
   integer :: id_start,id_end, itmp(10), step
   integer :: Np_tot,Np_local,N_infile,N_Local_file, ios,sum_Np
   integer :: file_start, file_end
@@ -447,9 +447,6 @@ integer :: iargc
       call check_nc( nf90_put_var(output_ncid, Pos_id(k), real(Pos(:,k),data_bytes), start=(/1,step/),count=(/Np_local,1/)) )
       call check_nc( nf90_put_var(output_ncid, Vel_id(k), real(Vel(:,k),data_bytes), start=(/1,step/),count=(/Np_local,1/)) )
     enddo
-    N_one=count(Pos(:,3).lt.50.)
-      call MPI_Allreduce(N_one,N_one_rec,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
-      if (my_id == 0) write(*,'(A,I8)') 'Particles in first layer: ',N_one_rec
     do k = 1,N_Scalar
       call check_nc( nf90_put_var(output_ncid, Scalar_id(k), real(Scalar_Var(:,k),data_bytes), start=(/1,step/),count=(/Np_local,1/)) )
     enddo

@@ -19,7 +19,7 @@ module particle_data
   end type particle_field
 
   type(particle_field), allocatable, dimension(:), target :: part_data1, part_data2
-  type(particle_field), dimension(:), pointer :: part_new, part_old, part_pt_tmp
+  type(particle_field), dimension(:), pointer :: part_new, part_old
 
   integer :: num_part
 

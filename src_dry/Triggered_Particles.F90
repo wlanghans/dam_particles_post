@@ -4,21 +4,17 @@ Program Parallel_Statistics
   use core_info
   implicit none
 
-  integer, parameter :: N_avg = 5
-
   real(8), parameter :: dt = 60.d0, dz=50.
   real(8), parameter :: dA = 4.d4**2.d0
 
   real(8), parameter :: Det_timer = 10.d0
-  real(8), parameter :: trigger_start=900.0, trigger_end=1800.,max_height=4000., min_height=150.
+  real(8), parameter :: trigger_start=900.0, trigger_end=1800.,max_height=5000., min_height=150.
 
   integer :: i,j,k
   integer :: itmp(10), step, step_cnt, step_out, step_in, int_tmp
   integer :: sum_Np, Nt_tot, N_active, Nz
-  integer :: N_Count, idx, idx_x, idx_y,ierr
+  integer :: N_Count, idx, idx_x, idx_y,ierr, Nz_ind
  
-  integer, dimension(:), allocatable :: N_triggered, local_mpi_int_buffer
-  real(8), dimension(:), allocatable :: Fdyn, Fbuoy, w2, local_mpi_real_buffer
 
   character(128):: fname_out
   character(*), parameter :: output_dir = "./"
@@ -26,14 +22,15 @@ Program Parallel_Statistics
   integer :: output_ncid
   integer :: dimids(2)
 
-  integer :: z_varid
+  integer :: z_varid, zi_varid
   integer, dimension(10) :: var_out_id
 
-  real(8), allocatable, dimension(:) :: Cell_Particle, Entrain, Lv_flux, inv_den, Center_Mass
+  integer, dimension(:), allocatable :: N_triggered, local_mpi_int_buffer
+  real(8), dimension(:), allocatable :: Fdyn, Fbuoy, w2, local_mpi_real_buffer, local_mpi_real_buffer2
 
   real(8), dimension(3) :: Pos
 
-  real(8) :: pi, dist, r_tmp(10), cell_volume, time
+  real(8) :: pi, dist, r_tmp(10), time, dz_part
 
   call initialize_mpi
   call initialize_core_files
@@ -45,16 +42,22 @@ Program Parallel_Statistics
   do i = 1, num_part
     part_new(i)%inactive_time = 0.
     part_new(i)%activity = .false.
+    part_new(i)%Vel(1) = 0.
   enddo
 
   N_active=0
   Nz = int(max_height/dz) 
 
-  allocate(N_triggered(Nz))
-  allocate(local_mpi_int_buffer(Nz))
+  allocate(N_triggered(Nz+1))
+  allocate(local_mpi_int_buffer(Nz+1))
+  allocate(local_mpi_real_buffer(Nz))
+  allocate(local_mpi_real_buffer2(Nz+1))
   allocate(Fdyn(Nz))
   allocate(Fbuoy(Nz))
-  allocate(w2(Nz))
+  allocate(w2(Nz+1))
+  w2    = 0.
+  Fdyn  = 0.
+  Fbuoy = 0.
 
   do step_out = 2, N_step
 
@@ -64,13 +67,20 @@ Program Parallel_Statistics
  
     
     do i = 1, num_part
+
+      ! retain triggering time
+      part_new(i)%Vel(1) = part_old(i)%Vel(1) 
+
       ! new initiation near sfc
       if ((.not.part_old(i)%activity)&
-    .and.(part_old(i)%Vel(3).le.0.0.and.part_new(i)%Vel(3).gt.0.0).and. & ! w becomes positive
+         .and.(part_old(i)%Vel(3).le.0.0.and.part_new(i)%Vel(3).gt.0.0).and. & ! w becomes positive
          (time.ge.trigger_start.and.time.le.trigger_end).and.           & ! within triggering time window   
          part_new(i)%Pos(3).le.min_height) then                           ! below 150 m
-         part_new(i)%activity=.true. 
-         part_new(i)%inactive_time=time
+         ! make sure it did not get triggered before
+         if (part_new(i)%inactive_time.ge.0.) then
+           part_new(i)%activity=.true. 
+           part_new(i)%inactive_time=time
+         end if
       end if
      
       ! initiated particle keeps rising actively, gets deactivated otherwise
@@ -82,8 +92,12 @@ Program Parallel_Statistics
    
       !check if active particle is considered as triggered
       if (part_new(i)%activity.and.part_new(i)%Pos(3).ge.max_height) then
-        ! swap sign to negative to indicate triggered particle
-        if (part_new(i)%inactive_time.ge.0.0) part_new(i)%inactive_time=-part_new(i)%inactive_time
+        if (part_new(i)%inactive_time.ge.0.0) then 
+           ! swap sign to negative to indicate triggered particle
+           part_new(i)%inactive_time=-part_new(i)%inactive_time
+           ! save triggering time
+           part_new(i)%Vel(1) = time
+        end if
       end if
       
       ! count active but untriggered particles at end of simulation
@@ -94,40 +108,61 @@ Program Parallel_Statistics
 
   call MPI_Allreduce(N_active,int_tmp,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
       N_active = int_tmp
-  if (masterproc) write(*,*) int_tmp ' particles are active and untriggered at end of simulation'
+  if (root) write(*,*) int_tmp ,' particles are active AND untriggered at end of simulation'
 
-  ! now get sum up all vertical profiles for all triggered particles
-  call Read_Data(1, part_new)
+
+  ! now get sum up all vertical profiles of all triggered particles
   do step_out=2,N_step
     time=step_out*dt
     part_old = part_new
     call Read_Data(step_out, part_new)
       do i = 1, num_part
-        if(part_new(i)%inactive_time.lt.0.0.and.abs(part_new(i)%inactive_time).le.time.and. &
+
+      ! retain triggering time
+      part_new(i)%Vel(1) = part_old(i)%Vel(1) 
+
+        if(part_new(i)%inactive_time.lt.0.0.and.                                    & ! got triggered
+         abs(part_new(i)%inactive_time).le.time.and.part_new(i)%Vel(1).ge.time.and. & ! got initiated in window
+                                                                                      ! and
+                                                                                      ! triggered
+                                                                                      ! only
+                                                                                      ! once
            part_new(i)%Pos(3).lt.max_height) then
            Nz_ind = INT(part_new(i)%Pos(3)/dz) + 1
-           N_triggered(Nz_ind) = N_triggered(Nz_ind) + 1     
-           Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + part_new(i)%scalar_var(x) 
-           Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + part_new(i)%scalar_var(y) 
-           w2(Nz_ind)          = w2(Nz_ind)    + (part_new(i)%Vel(3))**2
+           if (part_old(i)%Pos(3).lt.(Nz_ind-1)*dz    &        ! check if a particle enters a dz bin
+          .or.time.eq.abs(part_new(i)%inactive_time)) then  
+                N_triggered(Nz_ind) = N_triggered(Nz_ind) + 1  ! and increase number of trajectories in that bin    
+                if (time.ne.abs(part_new(i)%inactive_time)) then
+                   w2(Nz_ind) = w2(Nz_ind) + 0.5*(part_new(i)%Vel(3))**2 ! particle does not get initiated in this layer
+                else
+                   ! if it does get initiated in this layer its velocity is
+                   ! zero, fine
+                   N_triggered(Nz+1) = N_triggered(Nz+1) + 1 ! all particles that get initiated/triggered
+                                                             ! make it to the top
+                end if
+           end if
+           ! add buoyancy and mechanical forcing increment to this layer
+           dz_part=max(0.,part_new(i)%pos(3)-part_old(i)%pos(3))
+           Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + 0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12)) * dz_part
+           Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + 0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
         end if
      
       end do
   end do
 
   ! get average profiles
-  call MPI_Allreduce(N_triggered,local_mpi_int_buffer,Nz,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  call MPI_Allreduce(N_triggered,local_mpi_int_buffer,Nz+1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpi_err)
   N_triggered  = local_mpi_int_buffer
   call MPI_Allreduce(Fbuoy,local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
   Fbuoy = local_mpi_real_buffer
   call MPI_Allreduce(Fdyn,local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
   Fdyn = local_mpi_real_buffer
-  call MPI_Allreduce(w2,local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
-  w2 = local_mpi_real_buffer
+  call MPI_Allreduce(w2,local_mpi_real_buffer2,Nz+1,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  w2 = local_mpi_real_buffer2
 
-  Fbuoy = Fbuoy/dfloat(N_triggered)
-  Fdyn  = Fdyn /dfloat(N_triggered)
-  w2    = w2   /dfloat(N_triggered)
+  Fbuoy = Fbuoy/dfloat(N_triggered(1:Nz))/dz
+  Fdyn  = Fdyn /dfloat(N_triggered(1:Nz))/dz
+  w2    = w2   /dfloat(N_triggered(1:Nz+1))
 
   if(root) then
     write(*,*) "Writing Data"
@@ -138,20 +173,25 @@ Program Parallel_Statistics
     call check_nc( nf90_create(fname_out,nf90_clobber,output_ncid) )
 
 !  Define Dimensions
-    call check_nc( nf90_def_dim(output_ncid,"height",Nz,dimids(1)) )
+    call check_nc( nf90_def_dim(output_ncid,"z",Nz,dimids(1)) )
+    call check_nc( nf90_def_dim(output_ncid,"z",Nz,dimids(1)) )
+    call check_nc( nf90_def_dim(output_ncid,"zi",Nz,dimids(2)) )
+    call check_nc( nf90_def_dim(output_ncid,"zi",Nz,dimids(2)) )
 
-    call check_nc( nf90_def_var(output_ncid,"height",nf90_double,dimids(1),z_varid) )
+    call check_nc( nf90_def_var(output_ncid,"z",nf90_double,dimids(1),z_varid) )
+    call check_nc( nf90_def_var(output_ncid,"zi",nf90_double,dimids(2),zi_varid) )
 
 !  Define Variables
-    call check_nc( nf90_def_var( output_ncid,"N_triggered"       ,nf90_double,dimids(1),var_out_id(1) ) )
+    call check_nc( nf90_def_var( output_ncid,"N_triggered"       ,nf90_double,dimids(2),var_out_id(1) ) )
     call check_nc( nf90_def_var( output_ncid,"Fdyn"              ,nf90_double,dimids(1),var_out_id(2) ) )
     call check_nc( nf90_def_var( output_ncid,"Fbuoy"             ,nf90_double,dimids(1),var_out_id(3) ) )
-    call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids(1),var_out_id(4) ) )
+    call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids(2),var_out_id(4) ) )
 
     call check_nc( nf90_enddef(output_ncid) )
 
 !  Put variables
-    call check_nc( nf90_put_var(output_ncid, z_varid, (/(dfloat(i)*dz +.5d0*dz,i=0,Nz-1)/) ) )
+    call check_nc( nf90_put_var(output_ncid, z_varid, (/(dfloat(i)*dz +.5d0*dz, i=0,Nz-1)/) ) )
+    call check_nc( nf90_put_var(output_ncid, zi_varid, (/(dfloat(i)*dz, i=0,Nz)/) ) )
 
     call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(N_triggered)) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn) )
