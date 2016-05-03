@@ -174,9 +174,7 @@ Program Parallel_Statistics
 
 !  Define Dimensions
     call check_nc( nf90_def_dim(output_ncid,"z",Nz,dimids(1)) )
-    call check_nc( nf90_def_dim(output_ncid,"z",Nz,dimids(1)) )
-    call check_nc( nf90_def_dim(output_ncid,"zi",Nz,dimids(2)) )
-    call check_nc( nf90_def_dim(output_ncid,"zi",Nz,dimids(2)) )
+    call check_nc( nf90_def_dim(output_ncid,"zi",Nz+1,dimids(2)) )
 
     call check_nc( nf90_def_var(output_ncid,"z",nf90_double,dimids(1),z_varid) )
     call check_nc( nf90_def_var(output_ncid,"zi",nf90_double,dimids(2),zi_varid) )
