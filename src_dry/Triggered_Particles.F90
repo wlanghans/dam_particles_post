@@ -47,17 +47,20 @@ Program Parallel_Statistics
 
   N_active=0
   Nz = int(max_height/dz) 
+ 
+  if (root) write(*,*) 'Using nz = ',Nz,' vertical grid layers'
 
   allocate(N_triggered(Nz+1))
-  allocate(local_mpi_int_buffer(Nz+1))
-  allocate(local_mpi_real_buffer(Nz))
-  allocate(local_mpi_real_buffer2(Nz+1))
   allocate(Fdyn(Nz))
   allocate(Fbuoy(Nz))
   allocate(w2(Nz+1))
+  allocate(local_mpi_int_buffer(Nz+1))
+  allocate(local_mpi_real_buffer(Nz))
+  allocate(local_mpi_real_buffer2(Nz+1))
   w2    = 0.
   Fdyn  = 0.
   Fbuoy = 0.
+  N_triggered=0
 
   do step_out = 2, N_step
 
