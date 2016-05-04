@@ -112,7 +112,7 @@ Program Parallel_Statistics
   if (root) write(*,*) int_tmp ,' particles are active AND untriggered at end of simulation'
 
 
-  ! now sum up properties along trajectories of triggered particles
+  ! now sum up properties of all trajectories of triggered particles
   do step_out=2,N_step
     time=step_out*dt
     part_old = part_new
@@ -133,14 +133,18 @@ Program Parallel_Statistics
            if (time.eq.abs(part_new(i)%inactive_time)) then
               N_triggered( Nz_ind   ) = N_triggered(Nz_ind) + 1
               dz_part=part_new(i)%pos(3)-(Nz_ind-1)*dz 
-              Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + &
-              part_old(i)%scalar_var(12)(part_new(i)%scalar_var(12)-part_old(i)%scalar_var(12)) * dz_part
-              Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + &
-              0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
+              ! lin interpolate forcings to centerpoint (between bottom of dz layer and current Pos(3))
+              fbuoy_tmp = part_new(i)%scalar_var(12) - 0.5 * dz_part * & 
+              (part_new(i)%scalar_var(12)-part_old(i)%scalar_var(12))/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+              fdyn_tmp = part_new(i)%scalar_var(11) - 0.5 * dz_part * & 
+              (part_new(i)%scalar_var(11)-part_old(i)%scalar_var(11))/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+              Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + dz_part * fbuoy_tmp
+              Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + dz_part * fdyn_tmp
            end if
 
            ! particle is still in same layer, then just add work done in layer
            if (Nz_ind_old.eq.Nz_ind) then
+             ! again lin interpolate forcings to centerpoint
               dz_part=max(0.,part_new(i)%pos(3)-part_old(i)%pos(3))                
               Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + &
               0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12)) * dz_part
@@ -148,10 +152,10 @@ Program Parallel_Statistics
               0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
            end if
 
-           !particle rises into layer from below, use same forcing in eventually skipped layers 
+           !particle rises into layer from below
            if (Nz_ind_old.lt.Nz_ind) then
               if (Nz_ind.gt.Nz) then
-                 !particle above max_height
+                 !particle above or at max_height
                  Nz_ind=Nz
                  ztop=max_height
                  if (Nz_ind_old.lt.Nz) then
@@ -163,19 +167,27 @@ Program Parallel_Statistics
                  N_triggered( Nz_ind_old+1:Nz_ind   ) = N_triggered(Nz_ind_old+1:Nz_ind) + 1
               end if
 
+              !linear interpolate forcings and incrementally add them to height bins
               do k=Nz_ind_old,Nz_ind
                  if (k.eq.Nz_ind_old) then
                    dz_part= Nz_ind_old*dz-part_old(i)%Pos(3)
+                   fbuoy_tmp = part_old(i)%scalar_var(12) + 0.5 * dz_part *&
+                   (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
+                   fdyn_tmp = part_old(i)%scalar_var(11) + 0.5 * dz_part *&
+                   (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                  elseif (k.gt.Nz_ind_old.and.k.lt.Nz_ind) then
-                   dz_part=k*dz-(k-1)*dz
+                   dz_part=dz
+                   fbuoy_tmp = part_old(i)%scalar_var(12) + ( Nz_ind_old*dz-part_old(i)%Pos(3) + (k-Nz_ind_old-1)*dz + 0.5 * dz) *&
+                   (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
+                   fdyn_tmp = part_old(i)%scalar_var(11) + ( Nz_ind_old*dz-part_old(i)%Pos(3) + (k-Nz_ind_old-1)*dz + 0.5 * dz) *&
+                   (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                  else
                    dz_part= ztop - (k-1) * dz
+                   fbuoy_tmp = part_old(i)%scalar_var(12) + (part_new(i)%Pos(3) - part_old(i)%Pos(3) - 0.5 * dz_part) *&
+                   (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
+                   fdyn_tmp = part_old(i)%scalar_var(11) + (part_new(i)%Pos(3) - part_old(i)%Pos(3) - 0.5 * dz_part) *&
+                   (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                  end if
-                 !linear interpolate forcings for skipped cells
-                 fdyn_tmp = part_old(i)%scalar_var(11) + ((k-1)*dz+0.5*dz - part_old(i)%Pos(3))*&
-                 (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
-                 fbuoy_tmp = part_old(i)%scalar_var(12) + ((k-1)*dz+0.5*dz - part_old(i)%Pos(3))*&
-                 (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                  Fbuoy(k) = Fbuoy(k) +  fbuoy_tmp * dz_part
                  Fdyn(k)  = Fdyn(k)  +  fdyn_tmp  * dz_part
               end do
