@@ -61,6 +61,7 @@ Program Parallel_Statistics
   Fbuoy = 0.
   N_triggered=0
   w2=0.
+  N_Count=0
 
   do step_out = 2, N_step
 
@@ -95,11 +96,13 @@ Program Parallel_Statistics
    
       !check if active particle is considered as triggered
       if (part_new(i)%activity.and.part_new(i)%Pos(3).gt.max_height) then
-        if (part_new(i)%inactive_time.ge.0.0) then 
+        if (part_new(i)%inactive_time.gt.0.0) then 
            ! swap sign to negative to indicate triggered particle
            part_new(i)%inactive_time=-part_new(i)%inactive_time
            ! save triggering time
            part_new(i)%Vel(1) = time
+           ! increase total number of triggered particles
+           N_Count=N_Count+1
         end if
       end if
       
@@ -109,9 +112,12 @@ Program Parallel_Statistics
 
   end do
 
+  call MPI_Allreduce(N_Count,int_tmp,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
+      N_Count = int_tmp
+  if (root) write(*,*) N_Count ,' particles are triggered'
   call MPI_Allreduce(N_active,int_tmp,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
       N_active = int_tmp
-  if (root) write(*,*) int_tmp ,' particles are active AND untriggered at end of simulation'
+  if (root) write(*,*) N_active ,' particles are active AND untriggered at end of simulation'
 
 
   ! now sum up properties of all trajectories of triggered particles
@@ -158,8 +164,9 @@ Program Parallel_Statistics
               0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
            end if
 
-           !particle rises into layer from below
-           if (Nz_ind_old.lt.Nz_ind) then
+           !particle rises into layer from below, but does not get initiated in
+           !this layer
+           if (Nz_ind_old.lt.Nz_ind.and.time.ne.abs(part_new(i)%inactive_time)) then
               if (Nz_ind.gt.Nz) then
                  !particle above or at max_height
                  ztop=max_height
