@@ -26,11 +26,11 @@ Program Parallel_Statistics
   integer, dimension(10) :: var_out_id
 
   integer, dimension(:), allocatable :: N_triggered, local_mpi_int_buffer
-  real(8), dimension(:), allocatable :: Fdyn, Fbuoy, local_mpi_real_buffer, local_mpi_real_buffer2
+  real(8), dimension(:), allocatable :: Fdyn, Fbuoy, w2, local_mpi_real_buffer, local_mpi_real_buffer2
 
   real(8), dimension(3) :: Pos
 
-  real(8) :: pi, dist, r_tmp(10), time, dz_part, ztop, fdyn_tmp, fbuoy_tmp
+  real(8) :: pi, dist, r_tmp(10), time, dz_part, ztop, fdyn_tmp, fbuoy_tmp, w2_tmp
 
   call initialize_mpi
   call initialize_core_files
@@ -51,6 +51,7 @@ Program Parallel_Statistics
   if (root) write(*,*) 'Using nz = ',Nz,' vertical grid layers'
 
   allocate(N_triggered(Nz+1))
+  allocate(w2(Nz+1))
   allocate(Fdyn(Nz))
   allocate(Fbuoy(Nz))
   allocate(local_mpi_int_buffer(Nz+1))
@@ -59,6 +60,7 @@ Program Parallel_Statistics
   Fdyn  = 0.
   Fbuoy = 0.
   N_triggered=0
+  w2=0.
 
   do step_out = 2, N_step
 
@@ -138,8 +140,12 @@ Program Parallel_Statistics
               (part_new(i)%scalar_var(12)-part_old(i)%scalar_var(12))/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
               fdyn_tmp = part_new(i)%scalar_var(11) - 0.5 * dz_part * & 
               (part_new(i)%scalar_var(11)-part_old(i)%scalar_var(11))/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+              ! part_old(i)%Vel(3)<=0, thus a plus sign below
+              w2_tmp = (part_new(i)%Vel(3))**2 - dz_part * &
+              ((part_new(i)%Vel(3))**2+(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
               Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + dz_part * fbuoy_tmp
               Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + dz_part * fdyn_tmp
+              w2(Nz_ind)          = w2(Nz_ind)    + w2_tmp
            end if
 
            ! particle is still in same layer, then just add work done in layer
@@ -156,19 +162,22 @@ Program Parallel_Statistics
            if (Nz_ind_old.lt.Nz_ind) then
               if (Nz_ind.gt.Nz) then
                  !particle above or at max_height
-                 Nz_ind=Nz
                  ztop=max_height
                  if (Nz_ind_old.lt.Nz) then
                    N_triggered( Nz_ind_old+1:Nz  ) = N_triggered(Nz_ind_old+1:Nz) + 1
                  end if
+                 N_triggered( Nz+1 ) = N_triggered( Nz+1 ) + 1
+                 w2_tmp = (part_old(i)%Vel(3))**2 + ( Nz*dz-part_old(i)%Pos(3)) * &
+                 ((part_new(i)%Vel(3))**2-(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+                 w2(Nz+1) = w2(Nz+1) + w2_tmp
               else
                  !particle below max_height
                  ztop= part_new(i)%Pos(3)
                  N_triggered( Nz_ind_old+1:Nz_ind   ) = N_triggered(Nz_ind_old+1:Nz_ind) + 1
               end if
 
-              !linear interpolate forcings and incrementally add them to height bins
-              do k=Nz_ind_old,Nz_ind
+              !linear interpolate forcings and w2 and incrementally add them to height bins
+              do k=Nz_ind_old,min(Nz_ind,Nz)
                  if (k.eq.Nz_ind_old) then
                    dz_part= Nz_ind_old*dz-part_old(i)%Pos(3)
                    fbuoy_tmp = part_old(i)%scalar_var(12) + 0.5 * dz_part *&
@@ -181,12 +190,18 @@ Program Parallel_Statistics
                    (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                    fdyn_tmp = part_old(i)%scalar_var(11) + ( Nz_ind_old*dz-part_old(i)%Pos(3) + (k-Nz_ind_old-1)*dz + 0.5 * dz) *&
                    (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
+                   w2_tmp = (part_old(i)%Vel(3))**2 + ( (k-1)*dz-part_old(i)%Pos(3)) * &
+                   ((part_new(i)%Vel(3))**2-(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+                   w2(k) = w2(k) + w2_tmp
                  else
                    dz_part= ztop - (k-1) * dz
                    fbuoy_tmp = part_old(i)%scalar_var(12) + (part_new(i)%Pos(3) - part_old(i)%Pos(3) - 0.5 * dz_part) *&
                    (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                    fdyn_tmp = part_old(i)%scalar_var(11) + (part_new(i)%Pos(3) - part_old(i)%Pos(3) - 0.5 * dz_part) *&
                    (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
+                   w2_tmp = (part_old(i)%Vel(3))**2 + ( (k-1)*dz-part_old(i)%Pos(3)) * &
+                   ((part_new(i)%Vel(3))**2-(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+                   w2(k) = w2(k) + w2_tmp
                  end if
                  Fbuoy(k) = Fbuoy(k) +  fbuoy_tmp * dz_part
                  Fdyn(k)  = Fdyn(k)  +  fdyn_tmp  * dz_part
@@ -206,9 +221,12 @@ Program Parallel_Statistics
   Fbuoy = local_mpi_real_buffer
   call MPI_Allreduce(Fdyn,local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
   Fdyn = local_mpi_real_buffer
+  call MPI_Allreduce(w2,local_mpi_real_buffer2,Nz+1,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  w2 = local_mpi_real_buffer2
 
   Fbuoy = Fbuoy/dfloat(N_triggered(1:Nz))/dz
   Fdyn  = Fdyn /dfloat(N_triggered(1:Nz))/dz
+  w2    = w2   /dfloat(N_triggered(1:Nz+1))
 
   if(root) then
     write(*,*) "Writing Data"
@@ -226,19 +244,21 @@ Program Parallel_Statistics
     call check_nc( nf90_def_var(output_ncid,"zi",nf90_double,dimids(2),zi_varid) )
 
 !  Define Variables
-    call check_nc( nf90_def_var( output_ncid,"N_triggered"       ,nf90_double,dimids(1),var_out_id(1) ) )
+    call check_nc( nf90_def_var( output_ncid,"N_triggered"       ,nf90_double,dimids(2),var_out_id(1) ) )
     call check_nc( nf90_def_var( output_ncid,"Fdyn"              ,nf90_double,dimids(1),var_out_id(2) ) )
     call check_nc( nf90_def_var( output_ncid,"Fbuoy"             ,nf90_double,dimids(1),var_out_id(3) ) )
+    call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids(2),var_out_id(4) ) )
 
     call check_nc( nf90_enddef(output_ncid) )
 
 !  Put variables
     call check_nc( nf90_put_var(output_ncid, z_varid, (/(dfloat(i)*dz +.5d0*dz, i=0,Nz-1)/) ) )
-!    call check_nc( nf90_put_var(output_ncid, zi_varid, (/(dfloat(i)*dz, i=0,Nz)/) ) )
+    call check_nc( nf90_put_var(output_ncid, zi_varid, (/(dfloat(i)*dz, i=0,Nz)/) ) )
 
-    call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(N_triggered(1:Nz))) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(N_triggered)) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn ) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(3), Fbuoy) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(4), w2   ) )
 
     call check_nc( nf90_close(output_ncid) )
 
