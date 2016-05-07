@@ -4,15 +4,13 @@ Program Parallel_Statistics
   use core_info
   implicit none
 
-  integer, parameter :: Nz = 600
+  real(8), parameter :: dt = 60.d0, dz=50.
+  real(8), parameter :: dA = 4.d4**2.d0
+  real(8), parameter :: max_height=5000.
 
-  real(8), parameter :: dz = 50.d0, dt = 2.d0
+
   real(8) :: xl, xr, yl, yr
 
-  integer, parameter :: Nx = 100, Ny = 100
-  real(8), parameter :: dx = 50.d0, dy = 50.d0
-
-  real(8) :: dA 
 
   integer :: i,j,k
   integer :: itmp(10), step, step_cnt, step_out, step_in
@@ -25,88 +23,70 @@ Program Parallel_Statistics
   integer :: output_ncid
   integer :: dimids(2)
 
-  integer :: t_varid, z_varid
+  integer :: t_varid, z_varid, zi_varid
   integer, dimension(3) :: var_out_id
 
-  real(8), allocatable, dimension(:) :: Number_Density, Specific_Number_Density
+  real(8), allocatable, dimension(:) :: sum_vertical_velocities,sum_vertical_velocities_cloud
   integer, allocatable, dimension(:) :: Particle_Number
 
-  real(8) :: cell_volume
+  real :: time
 
   call initialize_mpi
   call initialize_core_files
   call construct_particle
 
-  allocate( Number_Density(Nz) )
-  allocate( Particle_Number(Nz) )
-  allocate( Specific_Number_Density(Nz) )
 
   call getarg(3,param_in)
-  step = char2int( trim(adjustl(param_in)) )
+  step_int = char2int( trim(adjustl(param_in)) )
 
-  call getarg(4,param_in)
-  if (root) print*,'Computing statistics for ',trim(adjustl(param_in)),' domain'
-  if (trim(adjustl(param_in)).eq.'vsmall' ) then
-     xl = 9.5d3
-     xr = 1.05d4
-     yl = 9.5d3
-     yr = 1.05d4
-  elseif (trim(adjustl(param_in)).eq.'small' ) then
-     xl = 8.0d3
-     xr = 1.2d4
-     yl = 8.0d3
-     yr = 1.2d4
-  elseif (trim(adjustl(param_in)).eq.'full' ) then
-     xl = 0.0d0
-     xr = real(Nx)*dx
-     yl = 0.0d0
-     yr = real(Ny)*dy
-  else
-     if (root) print*,'Error: Domain option not supported...'
-     call finalize_mpi
-  end if
-    
+  Nz = int(max_height/dz)
+  N_Count=0
 
-  dA = (xr-xl) * (yr-yl)
+  allocate( Particle_Number(Nz) )
+  allocate( sum_vertical_velocities(Nz) )
+  allocate( sum_vertical_velocities_cloud(Nz) )
 
-  call Read_Data(step+1, part_new)
-  !get layer mass and particle number in that layer;layer masss is stored in Specific_Number_Density
-  call compute_particle_mass_subdomain(Nz,dx,dy,dz,xl,xr,yl,yr,Specific_Number_Density,Particle_Number)
+  nstep=dt/dt_euler
+  do step_out=1,N_Step
+    nstep
+    if (mod(nstep,step_int).eq.0) then
 
-  !particles per mass
-  Specific_Number_Density=dfloat(Particle_Number)/Specific_Number_Density
-  cell_volume = dz*dA
-  Number_Density = dfloat(Particle_Number)/cell_volume
-  
+
+       N_Count=N_Count+1
+    end if
+
+  end do
+
+
 
   if(root) then
     write(*,*) "Writing Data"
 
     write(char_dz,'(i16)') int(dz)
-    write(char_step,'(i16)') step
-    dA=dA*1.0d0**(-6)
-    write(char_dA,'(i16)') dA
-    fname_out = trim(adjustl(output_dir))//'Lagrangian_Densities_dz_'//trim(adjustl(char_dz))//'_dA_'//trim(adjustl(param_in))//'_tstep_'//trim(adjustl(char_step))//'.nc'
+    fname_out = trim(adjustl(output_dir))//'Particle_Number_Velocity_dz_'//trim(adjustl(char_dz))//'.nc'
     write(*,*) fname_out
     call check_nc( nf90_create(fname_out,nf90_clobber,output_ncid) )
 
 !  Define Dimensions
     call check_nc( nf90_def_dim(output_ncid,"z",Nz,dimids(1)) )
-    call check_nc( nf90_def_dim(output_ncid,"time",1,dimids(2)) )
+    call check_nc( nf90_def_dim(output_ncid,"time",N_Count,dimids(2)) )
+    call check_nc( nf90_def_dim(output_ncid,"zi",Nz+1,dimids(3)) )
 
     call check_nc( nf90_def_var(output_ncid,"z",nf90_double,dimids(1),z_varid) )
     call check_nc( nf90_def_var(output_ncid,"time",nf90_double,dimids(2),t_varid) )
+    call check_nc( nf90_def_var(output_ncid,"zi",nf90_double,dimids(3),zi_varid) )
 
 !  Define Variables
-    call check_nc( nf90_def_var( output_ncid,"N_Particle"             ,nf90_double,dimids,var_out_id(1) ) )
-    call check_nc( nf90_def_var( output_ncid,"Number_Density"         ,nf90_double,dimids,var_out_id(2) ) )
-    call check_nc( nf90_def_var( output_ncid,"Specific_Number_Density",nf90_double,dimids,var_out_id(3) ) )
+    call check_nc( nf90_def_var( output_ncid,"N_Particle"             ,nf90_double,dimids(1:2),var_out_id(1) ) )
+    call check_nc( nf90_def_var( output_ncid,"SUM_W"                  ,nf90_double,dimids(1:2),var_out_id(2) ) )
+    call check_nc( nf90_def_var( output_ncid,"SUM_W_CLOUD"            ,nf90_double,dimids(1:2),var_out_id(3) ) )
 
     call check_nc( nf90_enddef(output_ncid) )
 
 !  Put variables
     call check_nc( nf90_put_var(output_ncid, z_varid, (/(dfloat(i)*dz + .5d0*dz ,i=0,Nz    -1)/) ) )
-    call check_nc( nf90_put_var(output_ncid, t_varid, step*dt ) )
+    call check_nc( nf90_put_var(output_ncid, zi_varid,(/(dfloat(i)*dz ,i=0,Nz   )/) ) )
+    call check_nc( nf90_put_var(output_ncid, t_varid, (/(dfloat(i)*dt ,i=1,N_Count )/) ) )
 
     call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(Particle_Number)) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(2), Number_Density) )
