@@ -32,9 +32,6 @@ Program Parallel_Statistics
 
   real(8) :: pi, dist, r_tmp(10), time, dz_part, ztop, fdyn_tmp, fbuoy_tmp, w2_tmp
  
-  logical :: lfoundgid
-  character(64) :: file_name
-  character(5)  :: char_rank
 
 
   call initialize_mpi
@@ -128,7 +125,6 @@ Program Parallel_Statistics
       N_active = int_tmp
   if (root) write(*,*) N_active ,' particles are active AND untriggered at end of simulation'
 
-  lfoundgid=.false. 
 
   ! now sum up properties of all trajectories of triggered particles
   do step_out=2,N_step
@@ -139,6 +135,7 @@ Program Parallel_Statistics
 
         ! retain triggering time (ie, time first above max_height)
         part_new(i)%Vel(1) = part_old(i)%Vel(1) 
+        ! retain max height reached so far in trajectory
         part_new(i)%Vel(2) = part_old(i)%Vel(2) 
 
         Nz_ind     = INT(part_new(i)%Pos(3)/dz) + 1
@@ -147,16 +144,15 @@ Program Parallel_Statistics
         if(part_new(i)%inactive_time.lt.0.0.and.                                 &    ! got triggered
         time.ge.abs(part_new(i)%inactive_time).and.time.le.part_new(i)%Vel(1)) then  ! data point between
 
+        Nz_ind_top = INT(part_new(i)%Vel(2)/dz) + 1
 
            ! particle is initiated in layer
            if (time.eq.abs(part_new(i)%inactive_time)) then
               N_triggered( Nz_ind   ) = N_triggered(Nz_ind) + 1
               dz_part=part_new(i)%pos(3)-(Nz_ind-1)*dz 
               ! lin interpolate forcings to centerpoint (between bottom of dz layer and current Pos(3))
-              fbuoy_tmp = part_new(i)%scalar_var(12) - 0.5 * dz_part * & 
-              (part_new(i)%scalar_var(12)-part_old(i)%scalar_var(12))/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
-              fdyn_tmp = part_new(i)%scalar_var(11) - 0.5 * dz_part * & 
-              (part_new(i)%scalar_var(11)-part_old(i)%scalar_var(11))/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+              fbuoy_tmp = 0.5 *   (part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12))
+              fdyn_tmp =  0.5 *   (part_new(i)%scalar_var(11)-part_old(i)%scalar_var(11))
               ! part_old(i)%Vel(3)<=0, thus a plus sign below
               w2_tmp = (part_new(i)%Vel(3))**2 - dz_part * &
               ((part_new(i)%Vel(3))**2+(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
@@ -221,11 +217,11 @@ Program Parallel_Statistics
            end if
            end if
 
+        ! store maximum height and index
+        part_new(i)%Vel(2) = max(part_new(i)%Pos(3),part_new(i)%Vel(2))
+
         end if
 
-        ! store maximum height and index
-        Nz_ind_top = max(Nz_ind,Nz_ind_top)
-        part_new(i)%Vel(2) = max(part_new(i)%Pos(3),part_new(i)%Vel(2))
 
       end do
   end do
