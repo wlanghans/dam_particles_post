@@ -13,7 +13,7 @@ Program Parallel_Statistics
   integer :: i,j,k
   integer :: itmp(10), step, step_cnt, step_out, step_in, int_tmp
   integer :: sum_Np, Nt_tot, N_active, Nz
-  integer :: N_Count, idx, idx_x, idx_y,ierr, Nz_ind, Nz_ind_old
+  integer :: N_Count, idx, idx_x, idx_y,ierr, Nz_ind, Nz_ind_old, Nz_ind_top
  
 
   character(128):: fname_out
@@ -31,6 +31,11 @@ Program Parallel_Statistics
   real(8), dimension(3) :: Pos
 
   real(8) :: pi, dist, r_tmp(10), time, dz_part, ztop, fdyn_tmp, fbuoy_tmp, w2_tmp
+ 
+  logical :: lfoundgid
+  character(64) :: file_name
+  character(5)  :: char_rank
+
 
   call initialize_mpi
   call initialize_core_files
@@ -62,6 +67,7 @@ Program Parallel_Statistics
   N_triggered=0
   w2=0.
   N_Count=0
+  Nz_ind_top=0
 
   do step_out = 2, N_step
 
@@ -107,7 +113,10 @@ Program Parallel_Statistics
       end if
       
       ! count active but untriggered particles at end of simulation
-      if (step_out.eq.N_step.and.part_new(i)%activity.and.part_new(i)%inactive_time.gt.0.0) N_active=N_active+1
+      if (step_out.eq.N_step.and.part_new(i)%activity.and.part_new(i)%inactive_time.gt.0.0) then 
+         N_active=N_active+1
+         part_new(i)%Vel(2)=0.0
+      end if
     end do
 
   end do
@@ -119,6 +128,7 @@ Program Parallel_Statistics
       N_active = int_tmp
   if (root) write(*,*) N_active ,' particles are active AND untriggered at end of simulation'
 
+  lfoundgid=.false. 
 
   ! now sum up properties of all trajectories of triggered particles
   do step_out=2,N_step
@@ -127,15 +137,16 @@ Program Parallel_Statistics
     call Read_Data(step_out, part_new)
       do i = 1, num_part
 
-      ! retain triggering time (ie, time first above max_height)
-      part_new(i)%Vel(1) = part_old(i)%Vel(1) 
+        ! retain triggering time (ie, time first above max_height)
+        part_new(i)%Vel(1) = part_old(i)%Vel(1) 
+        part_new(i)%Vel(2) = part_old(i)%Vel(2) 
+
+        Nz_ind     = INT(part_new(i)%Pos(3)/dz) + 1
+        Nz_ind_old = INT(part_old(i)%Pos(3)/dz) + 1
 
         if(part_new(i)%inactive_time.lt.0.0.and.                                 &    ! got triggered
-         time.ge.abs(part_new(i)%inactive_time).and.time.le.part_new(i)%Vel(1)) then  ! data point between
-                                                                                      ! initiation and triggering
+        time.ge.abs(part_new(i)%inactive_time).and.time.le.part_new(i)%Vel(1)) then  ! data point between
 
-           Nz_ind     = INT(part_new(i)%Pos(3)/dz) + 1
-           Nz_ind_old = INT(part_old(i)%Pos(3)/dz) + 1
 
            ! particle is initiated in layer
            if (time.eq.abs(part_new(i)%inactive_time)) then
@@ -154,24 +165,28 @@ Program Parallel_Statistics
               w2(Nz_ind)          = w2(Nz_ind)    + w2_tmp
            end if
 
-           ! particle is still in same layer, then just add work done in layer
-           if (Nz_ind_old.eq.Nz_ind) then
-             ! again lin interpolate forcings to centerpoint
-              dz_part=max(0.,part_new(i)%pos(3)-part_old(i)%pos(3))                
-              Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + &
-              0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12)) * dz_part
-              Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + &
-              0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
-           end if
+           if (Nz_ind.ge.Nz_ind_top .and. time.ne.abs(part_new(i)%inactive_time)) then !particle either in top layer or higher
 
-           !particle rises into layer from below, but does not get initiated in
-           !this layer
-           if (Nz_ind_old.lt.Nz_ind.and.time.ne.abs(part_new(i)%inactive_time)) then
+           ! particle is still in same layer, then just add work done in layer
+           if (Nz_ind.eq.Nz_ind_top) then
+              if (part_new(i)%Pos(3).gt.part_new(i)%Vel(2)) then
+               ! again lin interpolate forcings to centerpoint
+               ! the clipping here means that im just ignoring any downward segment of the trajectories
+                dz_part=part_new(i)%Pos(3)-part_new(i)%Vel(2)                
+                Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + &
+                0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12)) * dz_part
+                Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + &
+                0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
+                part_new(i)%Vel(2) = max(part_new(i)%Pos(3),part_new(i)%Vel(2))
+              end if
+
+           else  !particle rises into layer from below
+
               if (Nz_ind.gt.Nz) then
                  !particle above or at max_height
                  ztop=max_height
-                 if (Nz_ind_old.lt.Nz) then
-                   N_triggered( Nz_ind_old+1:Nz  ) = N_triggered(Nz_ind_old+1:Nz) + 1
+                 if (Nz_ind_top.lt.Nz) then
+                   N_triggered( Nz_ind_top+1:Nz  ) = N_triggered(Nz_ind_top+1:Nz) + 1
                  end if
                  N_triggered( Nz+1 ) = N_triggered( Nz+1 ) + 1
                  w2_tmp = (part_old(i)%Vel(3))**2 + ( Nz*dz-part_old(i)%Pos(3)) * &
@@ -180,32 +195,22 @@ Program Parallel_Statistics
               else
                  !particle below max_height
                  ztop= part_new(i)%Pos(3)
-                 N_triggered( Nz_ind_old+1:Nz_ind   ) = N_triggered(Nz_ind_old+1:Nz_ind) + 1
+                 N_triggered( Nz_ind_top+1:Nz_ind   ) = N_triggered(Nz_ind_top+1:Nz_ind) + 1
               end if
 
-              !linear interpolate forcings and w2 and incrementally add them to height bins
-              do k=Nz_ind_old,min(Nz_ind,Nz)
-                 if (k.eq.Nz_ind_old) then
-                   dz_part= Nz_ind_old*dz-part_old(i)%Pos(3)
-                   fbuoy_tmp = part_old(i)%scalar_var(12) + 0.5 * dz_part *&
-                   (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
-                   fdyn_tmp = part_old(i)%scalar_var(11) + 0.5 * dz_part *&
-                   (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
-                 elseif (k.gt.Nz_ind_old.and.k.lt.Nz_ind) then
+              fbuoy_tmp = 0.5 *(part_new(i)%scalar_var(12) + part_old(i)%scalar_var(12))
+              fdyn_tmp = 0.5 *(part_new(i)%scalar_var(11) + part_old(i)%scalar_var(11))
+              !linear interpolate w2 
+              do k=Nz_ind_top,min(Nz_ind,Nz)
+                 if (k.eq.Nz_ind_top) then
+                   dz_part= Nz_ind_top*dz-part_new(i)%Vel(2)
+                 elseif (k.gt.Nz_ind_top.and.k.lt.Nz_ind) then
                    dz_part=dz
-                   fbuoy_tmp = part_old(i)%scalar_var(12) + ( Nz_ind_old*dz-part_old(i)%Pos(3) + (k-Nz_ind_old-1)*dz + 0.5 * dz) *&
-                   (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
-                   fdyn_tmp = part_old(i)%scalar_var(11) + ( Nz_ind_old*dz-part_old(i)%Pos(3) + (k-Nz_ind_old-1)*dz + 0.5 * dz) *&
-                   (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                    w2_tmp = (part_old(i)%Vel(3))**2 + ( (k-1)*dz-part_old(i)%Pos(3)) * &
                    ((part_new(i)%Vel(3))**2-(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
                    w2(k) = w2(k) + w2_tmp
                  else
                    dz_part= ztop - (k-1) * dz
-                   fbuoy_tmp = part_old(i)%scalar_var(12) + (part_new(i)%Pos(3) - part_old(i)%Pos(3) - 0.5 * dz_part) *&
-                   (part_new(i)%scalar_var(12) - part_old(i)%scalar_var(12))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
-                   fdyn_tmp = part_old(i)%scalar_var(11) + (part_new(i)%Pos(3) - part_old(i)%Pos(3) - 0.5 * dz_part) *&
-                   (part_new(i)%scalar_var(11) - part_old(i)%scalar_var(11))/(part_new(i)%Pos(3) - part_old(i)%Pos(3))
                    w2_tmp = (part_old(i)%Vel(3))**2 + ( (k-1)*dz-part_old(i)%Pos(3)) * &
                    ((part_new(i)%Vel(3))**2-(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
                    w2(k) = w2(k) + w2_tmp
@@ -214,9 +219,13 @@ Program Parallel_Statistics
                  Fdyn(k)  = Fdyn(k)  +  fdyn_tmp  * dz_part
               end do
            end if
+           end if
 
         end if
 
+        ! store maximum height and index
+        Nz_ind_top = max(Nz_ind,Nz_ind_top)
+        part_new(i)%Vel(2) = max(part_new(i)%Pos(3),part_new(i)%Vel(2))
 
       end do
   end do
@@ -234,6 +243,7 @@ Program Parallel_Statistics
   Fbuoy = Fbuoy/dfloat(N_triggered(1:Nz))/dz
   Fdyn  = Fdyn /dfloat(N_triggered(1:Nz))/dz
   w2    = w2   /dfloat(N_triggered(1:Nz+1))
+
 
   if(root) then
     write(*,*) "Writing Data"
