@@ -9,7 +9,7 @@ LDFLAGS = ${FLAGS} ${LIB}
 
 FD = obj/
 
-EXE = Compute_Particle_Densities
+EXE = Triggered_Particles
 
 main = $(EXE).o
 modules = $(FD)module_core.o $(FD)module_mpi.o $(FD)module_particle.o

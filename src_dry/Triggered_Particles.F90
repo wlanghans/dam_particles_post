@@ -8,33 +8,33 @@ Program Parallel_Statistics
   real(8), parameter :: dA = 4.d4**2.d0, z_w2  = 350. ! z_w2 has to be <=max_height
                                                       ! and > min_height
 
-  real(8), parameter :: Det_timer = 10.d0
+  real(8), parameter :: Det_timer = 10.d0, dw = 0.01
   real(8), parameter :: trigger_start=900.0, trigger_end=1800.,max_height=5000., min_height=150.
-  real(8), parameter :: fb_min, fb_max, fd_min, fd_max
 
   integer :: i,j,k
   integer :: itmp(10), step, step_cnt, step_out, step_in, int_tmp
   integer :: sum_Np, Nt_tot, N_active, Nz, Nb, Nd  ! choose Nb, Nd such that dbf and dfd are around 0.01
-  integer :: N_Count, idx, idx_x, idx_y,ierr, Nz_ind, Nz_ind_old, Nz_ind_top, Nz_ind_w2
+  integer :: N_Count, idx, idx_x, idx_y,ierr, Nz_ind, Nz_ind_old, Nz_ind_top, Nz_ind_w2, Nb_ind, Nd_ind
  
 
   character(128):: fname_out
   character(*), parameter :: output_dir = "./"
-  character(16) :: char_dz,char_w,char_tmp
+  character(16) :: char_dz,char_w,char_dw
   integer :: output_ncid
-  integer :: dimids(2)
+  integer :: dimids(4)
 
-  integer :: z_varid, zi_varid
+  integer :: z_varid, zi_varid, bw_varid, dw_varid
   integer, dimension(10) :: var_out_id
 
   integer, dimension(:), allocatable :: N_triggered, local_mpi_int_buffer
-  integer, dimension(:,:), allocatable :: N_bd
+  real(8), dimension(:,:), allocatable :: N_bd
   real(8), dimension(:), allocatable :: Fdyn, Fbuoy, w2, local_mpi_real_buffer, local_mpi_real_buffer2
   real(8), dimension(:,:), allocatable :: w2bd
 
   real(8), dimension(3) :: Pos
 
-  real(8) :: pi, dist, r_tmp(10), time, dz_part, ztop, fdyn_tmp, fbuoy_tmp, w2_tmp
+  real(8) :: pi, dist, r_tmp(10), time, dz_part, ztop, fdyn_tmp, fbuoy_tmp, w2_tmp, max_bw, max_dw, min_bw, min_dw
+  real(8) :: fb_int, fd_int
  
 
   call initialize_mpi
@@ -70,6 +70,10 @@ Program Parallel_Statistics
   w2=0.
   N_Count=0
   Nz_ind_top=0
+  max_bw=0.0
+  max_dw=0.0
+  min_bw=1.d6
+  min_dw=1.d6
 
   do step_out = 2, N_step
 
@@ -177,6 +181,8 @@ Program Parallel_Statistics
               part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
               part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
               part_new(i)%Scalar_var(7) = 0.0
+              max_bw = max(max_bw,part_new(i)%Scalar_var(5))
+              max_dw = max(max_dw,part_new(i)%Scalar_var(6))
            end if
 
            if (Nz_ind.ge.Nz_ind_top .and. time.ne.abs(part_new(i)%inactive_time)) then !particle either in top layer or higher
@@ -243,6 +249,8 @@ Program Parallel_Statistics
                  if (k.lt.Nz_ind_w2) then
                   part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
                   part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
+                  max_bw = max(max_bw,part_new(i)%Scalar_var(5))
+                  max_dw = max(max_dw,part_new(i)%Scalar_var(6))
                  elseif (k.gt.Nz_ind_top.and.k.eq.Nz_ind_w2) then
                   part_new(i)%Scalar_var(7) = w2_tmp
                  end if
@@ -257,9 +265,61 @@ Program Parallel_Statistics
 
 
       end do
+
+      if (step_out.eq.N_step) then
+         min_bw = min(min_bw,part_new(i)%Scalar_var(5))
+         min_dw = min(min_dw,part_new(i)%Scalar_var(6))
+      end if
   end do
 
-  ! find max buoy and dyn work
+  ! find max/min buoy and dyn work
+  call MPI_Allreduce(max_bw,fbuoy_tmp,1,MPI_REAL8,MPI_MAX,MPI_COMM_WORLD,mpi_err)
+  max_bw = fbuoy_tmp
+  call MPI_Allreduce(max_dw,fdyn_tmp,1,MPI_REAL8,MPI_MAX,MPI_COMM_WORLD,mpi_err)
+  max_dw = fdyn_tmp
+  call MPI_Allreduce(min_bw,fbuoy_tmp,1,MPI_REAL8,MPI_MAX,MPI_COMM_WORLD,mpi_err)
+  min_bw = fbuoy_tmp
+  call MPI_Allreduce(min_dw,fdyn_tmp,1,MPI_REAL8,MPI_MAX,MPI_COMM_WORLD,mpi_err)
+  min_dw = fdyn_tmp
+
+  ! span grid for jpdf
+  Nb = INT((max_bw-min_bw) / dw ) + 1
+  Nd = INT((max_dw-min_dw) / dw ) + 1
+  max_bw = min_bw + real(Nb) * dw
+  max_dw = min_dw + real(Nd) * dw
+
+  allocate(N_bd(Nb,Nd))
+  allocate(w2bd(Nb,Nd))
+
+  N_bd=0.
+  w2bd=0.0
+
+  ! now sum up properties of all trajectories of triggered particles
+  part_old = part_new
+  do i = 1, num_part
+     ! retain work done so far from buoyancy and mechanical forcing
+     part_new(i)%Scalar_var(5) = part_old(i)%scalar_var(5)
+     part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6)
+     ! retain w at height z_w2
+     part_new(i)%Scalar_var(7) = part_old(i)%scalar_var(7)
+  
+     if (part_new(i)%inactive_time.lt.0.0) then ! particle gets triggered
+
+        Nb_ind = INT((part_new(i)%Scalar_var(5)-min_bw)/dw) + 1
+        Nd_ind = INT((part_new(i)%Scalar_var(6)-min_dw)/dw) + 1
+   
+        N_bd(Nb_ind,Nd_ind) = N_bd(Nb_ind,Nd_ind) + 1.
+        w2bd(Nb_ind,Nd_ind) = w2bd(Nb_ind,Nd_ind) + part_new(i)%Scalar_var(7)
+ 
+     end if
+  end do
+
+  ! sum up over tasks
+  call Reduce_Mtx(N_bd)
+  call Reduce_Mtx(w2bd)
+
+  ! divide by number in each bin
+  w2bd = w2bd/(N_bd+1.d-6)
 
   ! get average profiles
   call MPI_Allreduce(N_triggered,local_mpi_int_buffer,Nz+1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpi_err)
@@ -280,7 +340,9 @@ Program Parallel_Statistics
     write(*,*) "Writing Data"
 
     write(char_dz,'(i16)') int(dz)
-    fname_out = trim(adjustl(output_dir))//'Triggered_profile_dz_'//trim(adjustl(char_dz))//'.nc'
+    write(char_w,'(i16)') int(z_w2)
+    write(char_dw,'(i16)') int(1000.dw)
+    fname_out = trim(adjustl(output_dir))//'Triggered_profile_dz_'//trim(adjustl(char_dz))//'_budgetz_'//trim(adjustl(char_w))//'_dw_'//trim(adjustl(char_dw))//'.nc'
     write(*,*) fname_out
     call check_nc( nf90_create(fname_out,nf90_clobber,output_ncid) )
 
@@ -291,22 +353,31 @@ Program Parallel_Statistics
     call check_nc( nf90_def_var(output_ncid,"z",nf90_double,dimids(1),z_varid) )
     call check_nc( nf90_def_var(output_ncid,"zi",nf90_double,dimids(2),zi_varid) )
 
+    call check_nc( nf90_def_var(output_ncid,"bw",nf90_double,dimids(3),bw_varid) )
+    call check_nc( nf90_def_var(output_ncid,"dw",nf90_double,dimids(4),dw_varid) )
+
 !  Define Variables
     call check_nc( nf90_def_var( output_ncid,"N_triggered"       ,nf90_double,dimids(2),var_out_id(1) ) )
     call check_nc( nf90_def_var( output_ncid,"Fdyn"              ,nf90_double,dimids(1),var_out_id(2) ) )
     call check_nc( nf90_def_var( output_ncid,"Fbuoy"             ,nf90_double,dimids(1),var_out_id(3) ) )
     call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids(2),var_out_id(4) ) )
+    call check_nc( nf90_def_var( output_ncid,"w2_bd"             ,nf90_double,dimids(3:4),var_out_id(5) ) )
+    call check_nc( nf90_def_var( output_ncid,"N_bd"              ,nf90_double,dimids(3:4),var_out_id(6) ) )
 
     call check_nc( nf90_enddef(output_ncid) )
 
 !  Put variables
     call check_nc( nf90_put_var(output_ncid, z_varid, (/(dfloat(i)*dz +.5d0*dz, i=0,Nz-1)/) ) )
     call check_nc( nf90_put_var(output_ncid, zi_varid, (/(dfloat(i)*dz, i=0,Nz)/) ) )
+    call check_nc( nf90_put_var(output_ncid, bw_varid, (/(min_bw+0.5*dw+dfloat(i)*dw, i=0,Nb)/) ) )
+    call check_nc( nf90_put_var(output_ncid, dw_varid, (/(min_bd+0.5*dw+dfloat(i)*dw, i=0,Nd)/) ) )
 
     call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(N_triggered)) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn ) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(3), Fbuoy) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(4), w2   ) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(5), w2bd   ) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(6), N_bd   ) )
 
     call check_nc( nf90_close(output_ncid) )
 
