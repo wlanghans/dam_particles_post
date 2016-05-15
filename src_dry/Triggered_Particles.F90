@@ -5,15 +5,17 @@ Program Parallel_Statistics
   implicit none
 
   real(8), parameter :: dt = 60.d0, dz=50.
-  real(8), parameter :: dA = 4.d4**2.d0
+  real(8), parameter :: dA = 4.d4**2.d0, z_w2  = 350. ! z_w2 has to be <=max_height
+                                                      ! and > min_height
 
   real(8), parameter :: Det_timer = 10.d0
   real(8), parameter :: trigger_start=900.0, trigger_end=1800.,max_height=5000., min_height=150.
+  real(8), parameter :: fb_min, fb_max, fd_min, fd_max
 
   integer :: i,j,k
   integer :: itmp(10), step, step_cnt, step_out, step_in, int_tmp
-  integer :: sum_Np, Nt_tot, N_active, Nz
-  integer :: N_Count, idx, idx_x, idx_y,ierr, Nz_ind, Nz_ind_old, Nz_ind_top
+  integer :: sum_Np, Nt_tot, N_active, Nz, Nb, Nd  ! choose Nb, Nd such that dbf and dfd are around 0.01
+  integer :: N_Count, idx, idx_x, idx_y,ierr, Nz_ind, Nz_ind_old, Nz_ind_top, Nz_ind_w2
  
 
   character(128):: fname_out
@@ -26,13 +28,14 @@ Program Parallel_Statistics
   integer, dimension(10) :: var_out_id
 
   integer, dimension(:), allocatable :: N_triggered, local_mpi_int_buffer
+  integer, dimension(:,:), allocatable :: N_bd
   real(8), dimension(:), allocatable :: Fdyn, Fbuoy, w2, local_mpi_real_buffer, local_mpi_real_buffer2
+  real(8), dimension(:,:), allocatable :: w2bd
 
   real(8), dimension(3) :: Pos
 
   real(8) :: pi, dist, r_tmp(10), time, dz_part, ztop, fdyn_tmp, fbuoy_tmp, w2_tmp
  
-
 
   call initialize_mpi
   call initialize_core_files
@@ -40,6 +43,8 @@ Program Parallel_Statistics
 
 
   call Read_Data(1, part_new)
+
+  Nz_ind_w2 =  int(z_w2/dz) + 1
 
   do i = 1, num_part
     part_new(i)%inactive_time = 0.
@@ -112,7 +117,12 @@ Program Parallel_Statistics
       ! count active but untriggered particles at end of simulation
       if (step_out.eq.N_step.and.part_new(i)%activity.and.part_new(i)%inactive_time.gt.0.0) then 
          N_active=N_active+1
+      end if
+      if (step_out.eq.N_step) then 
          part_new(i)%Vel(2)=0.0
+         part_new(i)%scalar_var(5)=0.0
+         part_new(i)%scalar_var(6)=0.0
+         part_new(i)%scalar_var(7)=0.0
       end if
     end do
 
@@ -137,6 +147,11 @@ Program Parallel_Statistics
         part_new(i)%Vel(1) = part_old(i)%Vel(1) 
         ! retain max height reached so far in trajectory
         part_new(i)%Vel(2) = part_old(i)%Vel(2) 
+        ! retain work done so far from buoyancy and mechanical forcing
+        part_new(i)%Scalar_var(5) = part_old(i)%scalar_var(5) 
+        part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) 
+        ! retain w at height z_w2
+        part_new(i)%Scalar_var(7) = part_old(i)%scalar_var(7) 
 
         Nz_ind     = INT(part_new(i)%Pos(3)/dz) + 1
         Nz_ind_old = INT(part_old(i)%Pos(3)/dz) + 1
@@ -150,15 +165,18 @@ Program Parallel_Statistics
            if (time.eq.abs(part_new(i)%inactive_time)) then
               N_triggered( Nz_ind   ) = N_triggered(Nz_ind) + 1
               dz_part=part_new(i)%pos(3)-(Nz_ind-1)*dz 
-              ! lin interpolate forcings to centerpoint (between bottom of dz layer and current Pos(3))
+              ! use average for buoy and dyn forcing
               fbuoy_tmp = 0.5 *   (part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12))
               fdyn_tmp =  0.5 *   (part_new(i)%scalar_var(11)-part_old(i)%scalar_var(11))
-              ! part_old(i)%Vel(3)<=0, thus a plus sign below
-              w2_tmp = (part_new(i)%Vel(3))**2 - dz_part * &
-              ((part_new(i)%Vel(3))**2+(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
+              ! part_old(i)%Vel(3)<=0, thus a plus sign below in gradient
+               dz_part = -((part_new(i)%Vel(3))**2) * &
+              (part_new(i)%Pos(3)-part_old(i)%Pos(3))/ ((part_new(i)%Vel(3))**2+(part_old(i)%Vel(3))**2)
               Fbuoy(Nz_ind)       = Fbuoy(Nz_ind) + dz_part * fbuoy_tmp
               Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + dz_part * fdyn_tmp
-              w2(Nz_ind)          = w2(Nz_ind)    + w2_tmp
+              w2(Nz_ind)          = w2(Nz_ind)    + 0.0
+              part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
+              part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
+              part_new(i)%Scalar_var(7) = 0.0
            end if
 
            if (Nz_ind.ge.Nz_ind_top .and. time.ne.abs(part_new(i)%inactive_time)) then !particle either in top layer or higher
@@ -174,6 +192,12 @@ Program Parallel_Statistics
                 Fdyn(Nz_ind)        = Fdyn(Nz_ind)  + &
                 0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
                 part_new(i)%Vel(2) = max(part_new(i)%Pos(3),part_new(i)%Vel(2))
+                if (Nz_ind.lt.Nz_ind_w2) then
+                  part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * &
+                     0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12))
+                  part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * &
+                     0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11))
+                end if
               end if
 
            else  !particle rises into layer from below
@@ -188,6 +212,9 @@ Program Parallel_Statistics
                  w2_tmp = (part_old(i)%Vel(3))**2 + ( Nz*dz-part_old(i)%Pos(3)) * &
                  ((part_new(i)%Vel(3))**2-(part_old(i)%Vel(3))**2)/(part_new(i)%Pos(3)-part_old(i)%Pos(3))
                  w2(Nz+1) = w2(Nz+1) + w2_tmp
+                 if (Nz_ind_w2.eq.(Nz+1)) then
+                    part_new(i)%Scalar_var(7) = w2_tmp
+                 end if
               else
                  !particle below max_height
                  ztop= part_new(i)%Pos(3)
@@ -213,6 +240,12 @@ Program Parallel_Statistics
                  end if
                  Fbuoy(k) = Fbuoy(k) +  fbuoy_tmp * dz_part
                  Fdyn(k)  = Fdyn(k)  +  fdyn_tmp  * dz_part
+                 if (k.lt.Nz_ind_w2) then
+                  part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
+                  part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
+                 elseif (k.gt.Nz_ind_top.and.k.eq.Nz_ind_w2) then
+                  part_new(i)%Scalar_var(7) = w2_tmp
+                 end if
               end do
            end if
            end if
@@ -225,6 +258,8 @@ Program Parallel_Statistics
 
       end do
   end do
+
+  ! find max buoy and dyn work
 
   ! get average profiles
   call MPI_Allreduce(N_triggered,local_mpi_int_buffer,Nz+1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpi_err)

@@ -23,11 +23,15 @@ Program Parallel_Merge_Lagrangian_Data
   integer :: file_start, file_end
   integer, parameter :: fread_unit = 100, fread_param = 1000
 
-  integer, parameter :: N_Scalar = 15
+!  integer, parameter :: N_Scalar = 15
+  integer, parameter :: N_Scalar = 10
   character(*), parameter :: restart_name = "Lagrangian_Restart.nc"
-  character(*), dimension(N_Scalar), parameter :: var_name =(/"rho","qa","qv","qc","qr","qi","t","tabs","p","b","Fdyn","Fbuoy","Fbuoyd","Fbuoyv","Fbuoyc"/)
-  character(*), dimension(N_Scalar), parameter :: var_unit =(/"kg/m^3","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","K","K","Pa","m/s2","m/s2","m/s2","m/s2","m/s2","m/s2"/)
-  character(*), dimension(N_Scalar), parameter :: var_lname =(/"Density","Dry air","Water vapor","Liquid water","Rain","ice","Moist Potential Temperature","Temperature","Pressure","Buoyancy","dyn Forcing","buoyant forcing","dry buoy forcing","vapor buoyant forcing","condensate buoyant forcing"/)
+  !character(*), dimension(N_Scalar), parameter :: var_name =(/"rho","qa","qv","qc","qr","qi","t","tabs","p","b","Fdyn","Fbuoy","Fbuoyd","Fbuoyv","Fbuoyc"/)
+  !character(*), dimension(N_Scalar), parameter :: var_unit =(/"kg/m^3","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","K","K","Pa","m/s2","m/s2","m/s2","m/s2","m/s2","m/s2"/)
+  !character(*), dimension(N_Scalar), parameter :: var_lname =(/"Density","Dry air","Water vapor","Liquid water","Rain","ice","Moist Potential Temperature","Temperature","Pressure","Buoyancy","dyn Forcing","buoyant forcing","dry buoy forcing","vapor buoyant forcing","condensate buoyant forcing"/)
+  character(*), dimension(N_Scalar), parameter :: var_name =(/"rho","qa","qv","qc","qr","qi","t","tabs","p","b"/)
+  character(*), dimension(N_Scalar), parameter :: var_unit =(/"kg/m^3","kg/kg","kg/kg","kg/kg","kg/kg","kg/kg","K","K","Pa","m/s2"/)
+  character(*), dimension(N_Scalar), parameter :: var_lname =(/"Density","Dry air","Water vapor","Liquid water","Rain","ice","Moist Potential Temperature","Temperature","Pressure","Buoyancy"/)
 
   character(*), dimension(3), parameter :: Coord_var_name =(/"x","y","z"/)
   character(*), dimension(3), parameter :: Coord_var_unit =(/"m","m","m"/)
