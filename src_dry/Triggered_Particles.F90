@@ -341,7 +341,7 @@ Program Parallel_Statistics
 
     write(char_dz,'(i16)') int(dz)
     write(char_w,'(i16)') int(z_w2)
-    write(char_dw,'(i16)') int(1000.dw)
+    write(char_dw,'(i16)') int(1000.*dw)
     fname_out = trim(adjustl(output_dir))//'Triggered_profile_dz_'//trim(adjustl(char_dz))//'_budgetz_'//trim(adjustl(char_w))//'_dw_'//trim(adjustl(char_dw))//'.nc'
     write(*,*) fname_out
     call check_nc( nf90_create(fname_out,nf90_clobber,output_ncid) )
@@ -370,7 +370,7 @@ Program Parallel_Statistics
     call check_nc( nf90_put_var(output_ncid, z_varid, (/(dfloat(i)*dz +.5d0*dz, i=0,Nz-1)/) ) )
     call check_nc( nf90_put_var(output_ncid, zi_varid, (/(dfloat(i)*dz, i=0,Nz)/) ) )
     call check_nc( nf90_put_var(output_ncid, bw_varid, (/(min_bw+0.5*dw+dfloat(i)*dw, i=0,Nb)/) ) )
-    call check_nc( nf90_put_var(output_ncid, dw_varid, (/(min_bd+0.5*dw+dfloat(i)*dw, i=0,Nd)/) ) )
+    call check_nc( nf90_put_var(output_ncid, dw_varid, (/(min_dw+0.5*dw+dfloat(i)*dw, i=0,Nd)/) ) )
 
     call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(N_triggered)) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn ) )
