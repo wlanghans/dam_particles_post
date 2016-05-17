@@ -54,7 +54,7 @@ Program Parallel_Statistics
 
   if (Nz_ind_w2 .gt.Nz+1) then
     if (root) write(*,*) 'ERROR: Nz_ind_w2 outside of grid'
-    call mpi_finalize
+    call finalize_mpi
   else
     z_w2 = zi(Nz_ind_w2)
   end if
@@ -174,15 +174,15 @@ Program Parallel_Statistics
         part_new(i)%Scalar_var(7) = part_old(i)%scalar_var(7) 
 
         
-        Nz_ind = minloc( abs(part_new(i)%Pos(3)-zi) ) 
+        Nz_ind = minloc( abs(part_new(i)%Pos(3)-zi),1 ) 
         if (zi(Nz_ind).gt.part_new(i)%Pos(3)) Nz_ind=Nz_ind-1
-        Nz_ind_old = minloc( abs(part_old(i)%Pos(3)-zi) ) 
+        Nz_ind_old = minloc( abs(part_old(i)%Pos(3)-zi),1 ) 
         if (zi(Nz_ind_old).gt.part_old(i)%Pos(3)) Nz_ind_old=Nz_ind_old-1
 
         if(part_new(i)%inactive_time.lt.0.0.and.                                 &    ! got triggered
         time.ge.abs(part_new(i)%inactive_time).and.time.le.part_new(i)%Vel(1)) then  ! data point between
 
-        Nz_ind_top = minloc( abs(part_new(i)%Vel(2)-zi) ) 
+        Nz_ind_top = minloc( abs(part_new(i)%Vel(2)-zi),1 ) 
         if (zi(Nz_ind_top).gt.part_new(i)%Vel(2)) Nz_ind_top=Nz_ind_top-1
 
            ! particle is initiated in layer
