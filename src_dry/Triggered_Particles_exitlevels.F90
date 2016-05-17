@@ -7,8 +7,9 @@ Program Parallel_Statistics
   real(8), parameter :: dt = 60.d0, dz=0., Lv=2.5d6, cp=1005., grav= 9.81
   real(8), parameter :: dA = 4.d4**2.d0 ! z_w2 has to be <=max_height
                                                       ! and > min_height
-  integer , parameter :: nlayer = 4, Nz_ind_w2=10, s_tabs=7, s_qv=8
-  integer(nlayer), parameter :: nzm = (/40, 50, 60, 70/)
+  integer , parameter :: nlayer = 4, Nz_ind_w2=7, s_tabs=6, s_qv=2, s_dyn=7,s_buoy=8, &
+                    s_qc=3, s_qi=4, s_dw= 1, s_bw=5, s_w2 = 9
+  integer(nlayer), parameter :: nzm = (/28, 33, 42, 48/)
 
   real(8), parameter :: Det_timer = 10.d0, dw = 0.01
   real(8), parameter :: trigger_start=900.0, trigger_end=1800., min_height=300.
@@ -53,9 +54,12 @@ Program Parallel_Statistics
 
   call set_grid(z,zi,dz,dz_vector,nzm(nlayer))
 
+  if (root) write(*,*) 'Interfaces at: ',  
   do i=1,nlayer
     max_height(i) = zi(nzm(i)+1)
+    if (root) write(*,*) 'z= ',max_height(i)
   end do
+ 
 
   call Read_Data(1, part_new)
 
@@ -103,45 +107,52 @@ Program Parallel_Statistics
       part_new(i)%Vel(1) = part_old(i)%Vel(1) 
 
       ! new initiation below min_height
-      if ((.not.part_old(i)%activity)&
+      if (part_new(i)%inactive_time.eq.0.0 &                              ! make sure its in "not initated" mode
          .and.(part_old(i)%Vel(3).le.0.0.and.part_new(i)%Vel(3).gt.0.0).and. & ! w becomes positive
          (time.ge.trigger_start.and.time.le.trigger_end).and.           & ! within triggering time window   
-         part_new(i)%Pos(3).lt.min_height) then                           ! below 150 m
-         ! make sure it did not get triggered before
-         if (part_new(i)%inactive_time.ge.0.) then
-           part_new(i)%activity=.true. 
-           part_new(i)%inactive_time=time
-         end if
+         part_new(i)%Pos(3).lt.min_height) then                           ! below min_height
+
+         part_new(i)%inactive_time=time
+
       end if
-     
-      ! initiated particle keeps rising actively, gets deactivated otherwise
-      if (part_old(i)%activity.and.part_new(i)%Vel(3).ge.0.0) then 
-          part_new(i)%activity=.true.
-      elseif (part_old(i)%activity.and.part_new(i)%Vel(3).lt.0.0) then
-          part_new(i)%activity=.false.
-      end if
-   
+
       do k=1,nlayer
-      !check if active particle is considered as triggered
-      if (part_new(i)%activity.and.part_new(i)%Pos(3).gt.max_height(k)) then
-        if (part_new(i)%inactive_time.ne.0.0) then 
+      !check if formerly active particle is considered as triggered
+      if (part_old(i)%activity.and.part_new(i)%Pos(3).ge.max_height(k)) then
            ! swap sign to negative to indicate triggered particle
            if (part_new(i)%inactive_time.gt.0.0) part_new(i)%inactive_time=-part_new(i)%inactive_time
            ! save triggering height
            part_new(i)%Vel(1) = part_new(i)%Pos(3)
-        end if
       end if
       end do
+     
+      if (part_new(i)%inactive_time.lt.0.0) then ! triggered particle
+          if (part_old(i)%activity.and.part_new(i)%Vel(3).gt.0.0.and.&
+            (part_new(i)%scalar_var(s_qc)+part_new(i)%scalar_var(s_qi)  ).gt.1.d-5) then
+            part_new(i)%activity=.true. ! stays entrained
+          else
+            part_new(i)%activity=.false.! stays detrained or detrains
+          end if
+      elseif (part_new(i)%inactive_time.gt.0.0) then ! initiated but not triggered yet
+          if (part_new(i)%Vel(3).gt.0.0.and.&
+            (part_new(i)%scalar_var(s_qc)+part_new(i)%scalar_var(s_qi)  ).gt.1.d-5) then
+            part_new(i)%activity=.true. ! entrained
+          elseif (part_new(i)%Vel(3).le.0.0) then
+            part_new(i)%inactive_time=0.  ! set particle back to "not initiated" particle
+            part_new(i)%activity=.false.  ! and unactive
+          end if
+      end if
+
       
-      ! count active but untriggered particles at end of simulation
-      if (step_out.eq.N_step.and.part_new(i)%activity.and.part_new(i)%inactive_time.gt.0.0) then 
+      ! count triggered and not yet detrained particles at end of simulation
+      if (step_out.eq.N_step.and.part_new(i)%activity.and.part_new(i)%inactive_time.lt.0.0) then 
          N_active=N_active+1
       end if
       if (step_out.eq.N_step) then 
          part_new(i)%Vel(2)=0.0
-         part_new(i)%scalar_var(5)=0.0
-         part_new(i)%scalar_var(6)=0.0
-         part_new(i)%scalar_var(7)=0.0
+         part_new(i)%scalar_var(s_dw)=0.0
+         part_new(i)%scalar_var(s_dw)=0.0
+         part_new(i)%scalar_var(s_w2)=0.0
       end if
     end do
 
@@ -149,7 +160,7 @@ Program Parallel_Statistics
 
   call MPI_Allreduce(N_active,int_tmp,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
       N_active = int_tmp
-  if (root) write(*,*) N_active ,' particles are active AND untriggered at end of simulation'
+  if (root) write(*,*) N_active ,' particles are triggered at not yet detrained at end of simulation'
 
 
   ! now sum up properties of all trajectories of triggered particles
@@ -164,10 +175,10 @@ Program Parallel_Statistics
         ! retain max height reached so far in trajectory
         part_new(i)%Vel(2) = part_old(i)%Vel(2) 
         ! retain work done so far from buoyancy and mechanical forcing
-        part_new(i)%Scalar_var(5) = part_old(i)%scalar_var(5) 
-        part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) 
+        part_new(i)%Scalar_var(s_bw) = part_old(i)%scalar_var(s_bw) 
+        part_new(i)%Scalar_var(s_dw) = part_old(i)%scalar_var(s_dw) 
         ! retain w at height z_w2
-        part_new(i)%Scalar_var(7) = part_old(i)%scalar_var(7) 
+        part_new(i)%Scalar_var(s_w2) = part_old(i)%scalar_var(s_w2) 
 
         
         Nz_ind = minloc( abs(part_new(i)%Pos(3)-zi) ) 
@@ -176,7 +187,7 @@ Program Parallel_Statistics
         if (zi(Nz_ind_old).gt.part_old(i)%Pos(3)) Nz_ind_old=Nz_ind_old-1
 
         if(part_new(i)%inactive_time.lt.0.0.and.                                 &    ! got triggered
-        time.ge.abs(part_new(i)%inactive_time).and.part_new(i)%Vel(2).le.part_new(i)%Vel(1)) then  ! data point below max trigger height
+        time.ge.abs(part_new(i)%inactive_time).and.part_new(i)%Vel(2).lt.part_new(i)%Vel(1)) then  ! data point below max trigger height
 
         Nz_ind_top = minloc( abs(part_new(i)%Vel(2)-zi) ) 
         if (zi(Nz_ind_top).gt.part_new(i)%Vel(2)) Nz_ind_top=Nz_ind_top-1
@@ -187,8 +198,8 @@ Program Parallel_Statistics
                 if (part_new(i)%Vel(1).ge.max_height(k)) then 
                    N_triggered(k, Nz_ind   ) = N_triggered(k,Nz_ind) + 1
                    ! use average for buoy and dyn forcing
-                   fbuoy_tmp = 0.5 *   (part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12))
-                   fdyn_tmp =  0.5 *   (part_new(i)%scalar_var(11)-part_old(i)%scalar_var(11))
+                   fbuoy_tmp = 0.5 *   (part_new(i)%scalar_var(s_buoy)+part_old(i)%scalar_var(s_buoy))
+                   fdyn_tmp =  0.5 *   (part_new(i)%scalar_var(s_dyn)-part_old(i)%scalar_var(s_dyn))
                    ! part_old(i)%Vel(3)<=0, thus a plus sign below in gradient
                    dz_part = -((part_new(i)%Vel(3))**2) * &
                    (part_new(i)%Pos(3)-part_old(i)%Pos(3))/ ((part_new(i)%Vel(3))**2+(part_old(i)%Vel(3))**2)
@@ -198,17 +209,17 @@ Program Parallel_Statistics
                    ((part_new(i)%scalar_var(s_tabs)+part_new(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_new(i)%Pos(3) ) +&
                    (part_old(i)%scalar_var(s_tabs)+part_old(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_old(i)%Pos(3) ))
                    w2(k,Nz_ind)          = w2(k,Nz_ind)    + 0.0
-                   part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
-                   part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
-                   part_new(i)%Scalar_var(7) = 0.0
-                   max_bw = max(max_bw,part_new(i)%Scalar_var(5))
-                   max_dw = max(max_dw,part_new(i)%Scalar_var(6))
+                   part_new(i)%Scalar_var(s_bw) = part_new(i)%Scalar_var(s_bw) + dz_part * fbuoy_tmp
+                   part_new(i)%Scalar_var(s_dw) = part_old(i)%scalar_var(s_dw) + dz_part * fdyn_tmp
+                   part_new(i)%Scalar_var(s_w2) = 0.0
+                   max_bw = max(max_bw,part_new(i)%Scalar_var(s_bw))
+                   max_dw = max(max_dw,part_new(i)%Scalar_var(s_dw))
                    exit
                 end if
               end do
            end if
 
-           if (Nz_ind.ge.Nz_ind_top .and. time.ne.abs(part_new(i)%inactive_time)) then !particle either in top layer or higher
+           if (Nz_ind.ge.Nz_ind_top .and. time.ne.abs(part_new(i)%inactive_time)) then !particle either in current top layer or higher
 
            ! particle is still in same layer, then just add work done in layer
            if (Nz_ind.eq.Nz_ind_top) then
@@ -219,20 +230,20 @@ Program Parallel_Statistics
                     ! the clipping here means that im just ignoring any downward segment of the trajectories
                      dz_part=part_new(i)%Pos(3)-part_new(i)%Vel(2)                
                      Fbuoy(k,Nz_ind)       = Fbuoy(k,Nz_ind) + &
-                     0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12)) * dz_part
+                     0.5*(part_new(i)%scalar_var(s_buoy)+part_old(i)%scalar_var(s_buoy)) * dz_part
                      Fdyn(k,Nz_ind)        = Fdyn(k,Nz_ind)  + &
-                     0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
+                     0.5*(part_new(i)%scalar_var(s_dyn)+part_old(i)%scalar_var(s_dyn)) * dz_part
                      mse(k,Nz_ind)         = mse(k,Nz_ind) + dz_part * 0.5 *&
                      ((part_new(i)%scalar_var(s_tabs)+part_new(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_new(i)%Pos(3) ) +&
                      (part_old(i)%scalar_var(s_tabs)+part_old(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_old(i)%Pos(3) ))
                      part_new(i)%Vel(2) = max(part_new(i)%Pos(3),part_new(i)%Vel(2))
                      if (Nz_ind.lt.Nz_ind_w2) then
-                       part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * &
-                          0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12))
-                       part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * &
-                          0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11))
-                       max_bw = max(max_bw,part_new(i)%Scalar_var(5))
-                       max_dw = max(max_dw,part_new(i)%Scalar_var(6))
+                       part_new(i)%Scalar_var(s_bw) = part_new(i)%Scalar_var(s_bw) + dz_part * &
+                          0.5*(part_new(i)%scalar_var(s_buoy)+part_old(i)%scalar_var(s_buoy))
+                       part_new(i)%Scalar_var(s_dw) = part_old(i)%scalar_var(s_dw) + dz_part * &
+                          0.5*(part_new(i)%scalar_var(s_dyn)+part_old(i)%scalar_var(s_dyn))
+                       max_bw = max(max_bw,part_new(i)%Scalar_var(s_bw))
+                       max_dw = max(max_dw,part_new(i)%Scalar_var(s_dw)
                      end if
                      exit
                   end if
@@ -267,8 +278,8 @@ Program Parallel_Statistics
                  N_triggered( k_ind,Nz_ind_top+1:Nz_ind   ) = N_triggered(k_ind,Nz_ind_top+1:Nz_ind) + 1
               end if
 
-              fbuoy_tmp = 0.5 *(part_new(i)%scalar_var(12) + part_old(i)%scalar_var(12))
-              fdyn_tmp = 0.5 *(part_new(i)%scalar_var(11) + part_old(i)%scalar_var(11))
+              fbuoy_tmp = 0.5 *(part_new(i)%scalar_var(s_buoy) + part_old(i)%scalar_var(s_buoy))
+              fdyn_tmp = 0.5 *(part_new(i)%scalar_var(s_dyn) + part_old(i)%scalar_var(s_dyn))
               !linear interpolate w2 
               do k=Nz_ind_top,min(Nz_ind,nzm(k_ind))
                  if (k.eq.Nz_ind_top) then
@@ -286,16 +297,16 @@ Program Parallel_Statistics
                  end if
                  Fbuoy(k_ind,k) = Fbuoy(k_ind,k) +  fbuoy_tmp * dz_part
                  Fdyn(k_ind,k)  = Fdyn(k_ind,k)  +  fdyn_tmp  * dz_part
-                 mse(k,Nz_ind)         = mse(k,Nz_ind) + dz_part * 0.5 *&
+                 mse(k_ind,k)         = mse(k_ind,k) + dz_part * 0.5 *&
                  ((part_new(i)%scalar_var(s_tabs)+part_new(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_new(i)%Pos(3) ) +&
                  (part_old(i)%scalar_var(s_tabs)+part_old(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_old(i)%Pos(3) ))
                  if (k.lt.Nz_ind_w2) then
-                  part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
-                  part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
-                  max_bw = max(max_bw,part_new(i)%Scalar_var(5))
-                  max_dw = max(max_dw,part_new(i)%Scalar_var(6))
+                  part_new(i)%Scalar_var(s_bw) = part_new(i)%Scalar_var(s_bw) + dz_part * fbuoy_tmp
+                  part_new(i)%Scalar_var(s_dw) = part_old(i)%scalar_var(s_dw) + dz_part * fdyn_tmp
+                  max_bw = max(max_bw,part_new(i)%Scalar_var(s_bw))
+                  max_dw = max(max_dw,part_new(i)%Scalar_var(s_dw))
                  elseif (k.gt.Nz_ind_top.and.k.eq.Nz_ind_w2) then
-                  part_new(i)%Scalar_var(7) = w2_tmp
+                  part_new(i)%Scalar_var(s_w2) = w2_tmp
                  end if
               end do
            end if
@@ -310,8 +321,8 @@ Program Parallel_Statistics
       end do
 
       if (step_out.eq.N_step) then
-         min_bw = min(min_bw,part_new(i)%Scalar_var(5))
-         min_dw = min(min_dw,part_new(i)%Scalar_var(6))
+         min_bw = min(min_bw,part_new(i)%Scalar_var(s_bw))
+         min_dw = min(min_dw,part_new(i)%Scalar_var(s_dw))
       end if
   end do
 
@@ -339,13 +350,7 @@ Program Parallel_Statistics
   w2bd=0.0
 
   ! now sum up properties of all trajectories of triggered particles for each exit level
-  part_old = part_new
   do i = 1, num_part
-     ! retain work done so far from buoyancy and mechanical forcing
-     part_new(i)%Scalar_var(5) = part_old(i)%scalar_var(5)
-     part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6)
-     ! retain w at height z_w2
-     part_new(i)%Scalar_var(7) = part_old(i)%scalar_var(7)
   
      if (part_new(i)%inactive_time.lt.0.0) then ! particle gets triggered
 
@@ -356,11 +361,11 @@ Program Parallel_Statistics
           end if
         end do
 
-        Nb_ind = INT((part_new(i)%Scalar_var(5)-min_bw)/dw) + 1
-        Nd_ind = INT((part_new(i)%Scalar_var(6)-min_dw)/dw) + 1
+        Nb_ind = INT((part_new(i)%Scalar_var(s_bw)-min_bw)/dw) + 1
+        Nd_ind = INT((part_new(i)%Scalar_var(s_dw)-min_dw)/dw) + 1
    
         N_bd(k_ind,Nb_ind,Nd_ind) = N_bd(k_ind,Nb_ind,Nd_ind) + 1.
-        w2bd(k_ind,Nb_ind,Nd_ind) = w2bd(k_ind,Nb_ind,Nd_ind) + part_new(i)%Scalar_var(7)
+        w2bd(k_ind,Nb_ind,Nd_ind) = w2bd(k_ind,Nb_ind,Nd_ind) + part_new(i)%Scalar_var(s_w2)
  
      end if
   end do
