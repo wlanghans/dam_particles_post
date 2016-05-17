@@ -4,12 +4,11 @@ Program Parallel_Statistics
   use core_info
   implicit none
 
-  real(8), parameter :: dt = 60.d0, dz=0.
+  real(8), parameter :: dt = 60.d0, dz=0., Lv=2.5d6, cp=1005., grav= 9.81
   real(8), parameter :: dA = 4.d4**2.d0 ! z_w2 has to be <=max_height
                                                       ! and > min_height
-  integer , parameter :: nlayer = 4, Nz_ind_w2=10
+  integer , parameter :: nlayer = 4, Nz_ind_w2=10, s_tabs=7, s_qv=8
   integer(nlayer), parameter :: nzm = (/40, 50, 60, 70/)
-							! and indicate index of layer above analysis interface
 
   real(8), parameter :: Det_timer = 10.d0, dw = 0.01
   real(8), parameter :: trigger_start=900.0, trigger_end=1800., min_height=300.
@@ -34,7 +33,7 @@ Program Parallel_Statistics
   real(8), dimension(:,:,:), allocatable :: N_bd
   real(8), dimension(:,:), allocatable :: 2D_bd_tmp
   real(8), dimension(:), allocatable ::  local_mpi_real_buffer, local_mpi_real_buffer2, z, zi, dz_vector
-  real(8), dimension(:,:), allocatable :: Fdyn, Fbuoy, w2 
+  real(8), dimension(:,:), allocatable :: Fdyn, Fbuoy, w2, mse
   real(8), dimension(:,:,:), allocatable :: w2bd
 
   real(8), dimension(3) :: Pos
@@ -76,11 +75,13 @@ Program Parallel_Statistics
   allocate(w2(nlayer,nzm(nlayer)+1))
   allocate(Fdyn(nlayer,nzm(nlayer)))
   allocate(Fbuoy(nlayer,nzm(nlayer)))
+  allocate(mse(nlayer,nzm(nlayer)))
   allocate(local_mpi_int_buffer(nzm(nlayer)+1))
   allocate(local_mpi_real_buffer(nzm(nlayer)))
   allocate(local_mpi_real_buffer2(nzm(nlayer)+1))
   Fdyn  = 0.
   Fbuoy = 0.
+  mse = 0.
   N_triggered=0
   w2=0.
   Nz_ind_top=0
@@ -193,6 +194,9 @@ Program Parallel_Statistics
                    (part_new(i)%Pos(3)-part_old(i)%Pos(3))/ ((part_new(i)%Vel(3))**2+(part_old(i)%Vel(3))**2)
                    Fbuoy(k,Nz_ind)       = Fbuoy(k,Nz_ind) + dz_part * fbuoy_tmp
                    Fdyn(k,Nz_ind)        = Fdyn(k,Nz_ind)  + dz_part * fdyn_tmp
+                   mse(k,Nz_ind)         = mse(k,Nz_ind) + (part_new(i)%Pos(3)-zi(Nz_ind)) * 0.5 *&
+                   ((part_new(i)%scalar_var(s_tabs)+part_new(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_new(i)%Pos(3) ) +&
+                   (part_old(i)%scalar_var(s_tabs)+part_old(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_old(i)%Pos(3) ))
                    w2(k,Nz_ind)          = w2(k,Nz_ind)    + 0.0
                    part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
                    part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
@@ -218,6 +222,9 @@ Program Parallel_Statistics
                      0.5*(part_new(i)%scalar_var(12)+part_old(i)%scalar_var(12)) * dz_part
                      Fdyn(k,Nz_ind)        = Fdyn(k,Nz_ind)  + &
                      0.5*(part_new(i)%scalar_var(11)+part_old(i)%scalar_var(11)) * dz_part
+                     mse(k,Nz_ind)         = mse(k,Nz_ind) + dz_part * 0.5 *&
+                     ((part_new(i)%scalar_var(s_tabs)+part_new(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_new(i)%Pos(3) ) +&
+                     (part_old(i)%scalar_var(s_tabs)+part_old(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_old(i)%Pos(3) ))
                      part_new(i)%Vel(2) = max(part_new(i)%Pos(3),part_new(i)%Vel(2))
                      if (Nz_ind.lt.Nz_ind_w2) then
                        part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * &
@@ -279,6 +286,9 @@ Program Parallel_Statistics
                  end if
                  Fbuoy(k_ind,k) = Fbuoy(k_ind,k) +  fbuoy_tmp * dz_part
                  Fdyn(k_ind,k)  = Fdyn(k_ind,k)  +  fdyn_tmp  * dz_part
+                 mse(k,Nz_ind)         = mse(k,Nz_ind) + dz_part * 0.5 *&
+                 ((part_new(i)%scalar_var(s_tabs)+part_new(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_new(i)%Pos(3) ) +&
+                 (part_old(i)%scalar_var(s_tabs)+part_old(i)%scalar_var(s_qv)*Lv/cp +grav/cp*part_old(i)%Pos(3) ))
                  if (k.lt.Nz_ind_w2) then
                   part_new(i)%Scalar_var(5) = part_new(i)%Scalar_var(5) + dz_part * fbuoy_tmp
                   part_new(i)%Scalar_var(6) = part_old(i)%scalar_var(6) + dz_part * fdyn_tmp
@@ -368,6 +378,7 @@ Program Parallel_Statistics
   ! divide by number in each bin
   w2bd = w2bd/(N_bd+1.d-6)
 
+  do k=1,nlayer
   ! get average profiles
   call MPI_Allreduce(N_triggered(k,:),local_mpi_int_buffer,nzm(nlayer)+1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpi_err)
   N_triggered(k,:)  = local_mpi_int_buffer
@@ -375,12 +386,16 @@ Program Parallel_Statistics
   Fbuoy(k,:) = local_mpi_real_buffer
   call MPI_Allreduce(Fdyn(k,:),local_mpi_real_buffer,nzm(nlayer),MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
   Fdyn(k,:) = local_mpi_real_buffer
+  call MPI_Allreduce(mse(k,:),local_mpi_real_buffer,nzm(nlayer),MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
+  mse(k,:) = local_mpi_real_buffer
   call MPI_Allreduce(w2(k,:),local_mpi_real_buffer2,nzm(nlayer)+1,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
   w2(k,:) = local_mpi_real_buffer2
 
   Fbuoy(k,:) = Fbuoy(k,:)/(dfloat(N_triggered(k,1:nzm(nlayer)))+1.d-6)/dz_vector(1:Nz)
   Fdyn(k,:)  = Fdyn(k,:) /(dfloat(N_triggered(k,1:nzm(nlayer)))+1.d-6)/dz_vector(1:Nz)
+  mse(k,:)   = mse(k,:)  /(dfloat(N_triggered(k,1:nzm(nlayer)))+1.d-6)/dz_vector(1:Nz)
   w2(k,:)    = w2(k,:)   /(dfloat(N_triggered(k,1:nzm(nlayer)+1))+1.d-6)
+  end do
 
 
   if(root) then
@@ -412,6 +427,7 @@ Program Parallel_Statistics
     call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids((/5,2/)),var_out_id(4) ) )
     call check_nc( nf90_def_var( output_ncid,"w2_bd"             ,nf90_double,dimids((/5,3,4/)),var_out_id(5) ) )
     call check_nc( nf90_def_var( output_ncid,"N_bd"              ,nf90_double,dimids((/5,3,4/)),var_out_id(6) ) )
+    call check_nc( nf90_def_var( output_ncid,"mse"               ,nf90_double,dimids((/5,1/)),var_out_id(7) ) )
 
     call check_nc( nf90_enddef(output_ncid) )
 
@@ -428,6 +444,7 @@ Program Parallel_Statistics
     call check_nc( nf90_put_var(output_ncid, var_out_id(4), w2   ) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(5), w2bd   ) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(6), N_bd   ) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(7), mse) )
 
     call check_nc( nf90_close(output_ncid) )
 
