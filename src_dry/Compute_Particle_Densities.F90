@@ -6,7 +6,7 @@ program Parallel_Statistics
 
   real(8), parameter :: dt = 60.d0
   real(8), parameter :: dA = 4.d4**2.d0, dz=0., dx=100., dy=100.
-  real(8), parameter :: max_height=5000.
+  real(8), parameter :: max_height=14000.
   integer, parameter :: nzm=115, Nx=400, Ny=400
 
 
@@ -94,7 +94,7 @@ program Parallel_Statistics
          if (Nz_ind.le.Nz) then
            Particle_Number (Nz_ind,N_Count) = Particle_Number (Nz_ind,N_Count) + 1
            sum_vertical_velocities (Nz_ind,N_Count) = sum_vertical_velocities (Nz_ind,N_Count) + part_new(i)%Vel(3)
-           if ((part_new(i)%scalar_var(4)+part_new(i)%scalar_var(6)).gt.1.e-5) &
+           if ((part_new(i)%scalar_var(4)+part_new(i)%scalar_var(3)).gt.1.e-5) &
            sum_vertical_velocities_cloud (Nz_ind,N_Count) = sum_vertical_velocities_cloud (Nz_ind,N_Count) + part_new(i)%Vel(3)
          end if
 

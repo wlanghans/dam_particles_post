@@ -9,7 +9,7 @@ LDFLAGS = ${FLAGS} ${LIB}
 
 FD = obj/
 
-EXE = Triggered_Particles
+EXE = Triggered_Particles_exitlevels
 
 main = $(EXE).o
 modules = $(FD)module_core.o $(FD)module_mpi.o $(FD)module_particle.o
