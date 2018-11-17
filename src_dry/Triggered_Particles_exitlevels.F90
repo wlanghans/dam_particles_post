@@ -7,10 +7,10 @@ Program Parallel_Statistics
   real(8), parameter :: dt = 60.d0, dz=0., Lv=2.5d6, cp=1005., grav= 9.81
   real(8), parameter :: dA = 4.d4**2.d0 ! z_w2 has to be <=max_height
                                                       ! and > min_height
-  integer , parameter :: nlayer = 1, Nz_ind_w2=7, s_tabs=6, s_qv=2, s_dyn=7,s_buoy=8, &
+  integer , parameter :: nlayer = 2, Nz_ind_w2=7, s_tabs=6, s_qv=2, s_dyn=7,s_buoy=8, &
                     s_qc=3, s_qi=4, s_dw= 1, s_bw=5, s_w2 = 9
 !  integer, dimension(nlayer), parameter :: nzm = (/28, 33, 42, 48/)
-  integer, dimension(nlayer), parameter :: nzm = (/48/)
+  integer, dimension(nlayer), parameter :: nzm = (/42,48/)
   logical, parameter :: dojpdf=.false.
 
   real(8), parameter :: Det_timer = 10.d0, dw = 0.01
@@ -26,7 +26,7 @@ Program Parallel_Statistics
   character(*), parameter :: output_dir = "./"
   character(16) :: char_dz,char_w,char_dw
   integer :: output_ncid
-  integer :: dimids(4)
+  integer :: dimids(5)
 
   integer :: z_varid, zi_varid, bw_varid, dw_varid, ze_varid
   integer, dimension(10) :: var_out_id
@@ -164,7 +164,6 @@ Program Parallel_Statistics
   call MPI_Allreduce(N_active,int_tmp,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
       N_active = int_tmp
   if (root) write(*,*) N_active ,' particles are triggered and not yet detrained at end of simulation'
-
 
   ! now sum up properties of all trajectories of triggered particles
   do step_out=2,N_step
@@ -329,6 +328,8 @@ Program Parallel_Statistics
       end if
   end do
 
+  if (root) write(*,*) 'averaging profiles now' 
+
   do k=1,nlayer
   ! get average profiles
   call MPI_Allreduce(N_triggered(k,:),local_mpi_int_buffer,nzm(nlayer)+1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpi_err)
@@ -347,6 +348,7 @@ Program Parallel_Statistics
   mse(k,:)   = mse(k,:)/(dfloat(N_triggered(k,1:nzm(nlayer)))+1.d-6)/dz_vector(1:Nz)
   w2(k,:)    = w2(k,:)   /(dfloat(N_triggered(k,1:nzm(nlayer)+1))+1.d-6)
   end do
+  if (root) write(*,*) 'averaging profiles done' 
 
   if (dojpdf) then
   ! find max/min buoy and dyn work
@@ -412,7 +414,19 @@ Program Parallel_Statistics
 
   end if
 
-  if(root) then
+  call MPI_BARRIER(MPI_COMM_WORLD,ierr)
+
+    if(root) then
+
+    do i=1,nlayer
+    write(*,*) ' '
+    write(*,*) 'ze=',max_height(i)
+    write(*,*) ' '
+    do k=1,Nz
+      write(*,*) zi(k),'  ',dfloat(N_triggered(i,k))
+    end do
+    end do
+
     write(*,*) "Writing Data"
 
     write(char_w,'(i16)') int(z_w2)
@@ -441,10 +455,10 @@ Program Parallel_Statistics
 
 !  Define Variables
     call check_nc( nf90_def_var( output_ncid,"N_triggered"       ,nf90_double,dimids((/5,2/)),var_out_id(1) ) )
-    call check_nc( nf90_def_var( output_ncid,"Fdyn"              ,nf90_double,dimids((/5,1/)),var_out_id(2) ) )
-    call check_nc( nf90_def_var( output_ncid,"Fbuoy"             ,nf90_double,dimids((/5,1/)),var_out_id(3) ) )
-    call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids((/5,2/)),var_out_id(4) ) )
-    call check_nc( nf90_def_var( output_ncid,"mse"               ,nf90_double,dimids((/5,1/)),var_out_id(7) ) )
+   ! call check_nc( nf90_def_var( output_ncid,"Fdyn"              ,nf90_double,dimids((/5,1/)),var_out_id(2) ) )
+   ! call check_nc( nf90_def_var( output_ncid,"Fbuoy"             ,nf90_double,dimids((/5,1/)),var_out_id(3) ) )
+   ! call check_nc( nf90_def_var( output_ncid,"w2"                ,nf90_double,dimids((/5,2/)),var_out_id(4) ) )
+   ! call check_nc( nf90_def_var( output_ncid,"mse"               ,nf90_double,dimids((/5,1/)),var_out_id(7) ) )
     if (dojpdf) then
     call check_nc( nf90_def_var( output_ncid,"w2_bd"             ,nf90_double,dimids((/5,3,4/)),var_out_id(5) ) )
     call check_nc( nf90_def_var( output_ncid,"N_bd"              ,nf90_double,dimids((/5,3,4/)),var_out_id(6) ) )
@@ -458,10 +472,10 @@ Program Parallel_Statistics
     call check_nc( nf90_put_var(output_ncid, ze_varid, max_height ) )
 
     call check_nc( nf90_put_var(output_ncid, var_out_id(1), dfloat(N_triggered)) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn ) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(3), Fbuoy) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(4), w2   ) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(7), mse) )
+    !call check_nc( nf90_put_var(output_ncid, var_out_id(2), Fdyn ) )
+    !call check_nc( nf90_put_var(output_ncid, var_out_id(3), Fbuoy) )
+    !call check_nc( nf90_put_var(output_ncid, var_out_id(4), w2   ) )
+    !call check_nc( nf90_put_var(output_ncid, var_out_id(7), mse) )
     if (dojpdf) then
     call check_nc( nf90_put_var(output_ncid, var_out_id(5), w2bd   ) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(6), N_bd   ) )

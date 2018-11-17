@@ -4,10 +4,10 @@ program Parallel_Statistics
   use core_info
   implicit none
 
-  real(8), parameter :: dt = 60.d0
-  real(8), parameter :: dA = 4.d4**2.d0, dz=0., dx=100., dy=100.
+  real(8), parameter :: dt = 120.d0
+  real(8), parameter :: dA = 1.d4**2.d0, dz=100., dx=100., dy=100.
   real(8), parameter :: max_height=14000.
-  integer, parameter :: nzm=115, Nx=400, Ny=400
+  integer, parameter :: nzm=400, Nx=100, Ny=100
 
 
   real(8) :: xl, xr, yl, yr, max_height_new
@@ -30,7 +30,8 @@ program Parallel_Statistics
   real(8), allocatable, dimension(:,:) :: sum_vertical_velocities,sum_vertical_velocities_cloud
   real(8), allocatable, dimension(:) :: local_mpi_real_buffer, z, zi, dz_vector
   integer, allocatable, dimension(:,:) :: Particle_Number
-  integer, allocatable, dimension(:,:,:,:) :: Nxy
+  real(8), allocatable, dimension(:,:,:,:) :: Nxy
+  real(8), allocatable, dimension(:,:) :: hlp
   integer, allocatable, dimension(:) :: local_mpi_int_buffer
 
   integer :: lag_per_snap
@@ -53,21 +54,22 @@ program Parallel_Statistics
   if (root) write(*,*) 'Using Nz = ',Nz,' vertical grid layers with ztop= ',max_height_new
 
  
-  time_firstsnap=0.*4.
+  time_firstsnap=0.
   step_start = INT(time_firstsnap/dt) + 1
   N_Count = 0 
-  lag_per_snap = 10
+  lag_per_snap = 4
   Nt_tot = (N_Step - step_start) / lag_per_snap + 1
 
   allocate( Particle_Number(Nz,Nt_tot) )
   allocate( Nxy(Nx,Ny,10,Nt_tot) )
+  allocate( hlp(Nx,Ny) )
   allocate( sum_vertical_velocities(Nz,Nt_tot) )
   allocate( sum_vertical_velocities_cloud(Nz,Nt_tot) )
   allocate( local_mpi_int_buffer(Nz) )
   allocate( local_mpi_real_buffer(Nz) )
 
   Particle_Number = 0
-  Nxy = 0 
+  Nxy = 0.
   sum_vertical_velocities = 0.
   sum_vertical_velocities_cloud = 0.
 
@@ -88,7 +90,7 @@ program Parallel_Statistics
          end if 
     
          if (Nz_ind.le.10) then
-           Nxy(Nx_ind,Ny_ind,Nz_ind,N_Count) = Nxy(Nx_ind,Ny_ind,Nz_ind,N_Count) + 1
+           Nxy(Nx_ind,Ny_ind,Nz_ind,N_Count) = Nxy(Nx_ind,Ny_ind,Nz_ind,N_Count) + 1.
          end if    
  
          if (Nz_ind.le.Nz) then
@@ -107,6 +109,11 @@ program Parallel_Statistics
        sum_vertical_velocities(:,N_Count) = local_mpi_real_buffer
        call MPI_Allreduce(sum_vertical_velocities_cloud(:,N_Count),local_mpi_real_buffer,Nz,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,mpi_err)
        sum_vertical_velocities_cloud(:,N_Count) = local_mpi_real_buffer
+       do k=1,10
+         hlp = Nxy(:,:,k,N_Count)
+         call Reduce_Mtx(hlp)
+         Nxy(:,:,k,N_Count) = hlp
+       end do
 
 
   end do
@@ -157,7 +164,7 @@ program Parallel_Statistics
     call check_nc( nf90_put_var(output_ncid, var_out_id(2),sum_vertical_velocities) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(3),sum_vertical_velocities_cloud) )
     call check_nc( nf90_put_var(output_ncid, var_out_id(4),dz_vector(1:Nz)) )
-    call check_nc( nf90_put_var(output_ncid, var_out_id(5),dfloat(Nxy)) )
+    call check_nc( nf90_put_var(output_ncid, var_out_id(5),Nxy) )
 
     call check_nc( nf90_close(output_ncid) )
 
